@@ -159,6 +159,11 @@
     <h2 id="inicio-mes-titulo">Este mes</h2>
     <div class="stat-row">
       <div class="card"><div class="card-label">Gastado</div><div class="card-value mono" id="inicio-total">$0</div></div>
+      <div class="card"><div class="card-label">Ingresos</div><div class="card-value mono" id="inicio-ingresos" style="color:var(--green);">$0</div></div>
+    </div>
+    <div class="card">
+      <div class="card-label" style="margin-bottom:6px;">Neto del mes</div>
+      <div class="card-value mono" id="inicio-neto" style="font-size:24px;"></div>
     </div>
     <div class="card">
       <div class="card-label" style="margin-bottom:10px;">Por sección</div>
@@ -176,6 +181,10 @@
 
   <!-- CARGAR -->
   <div class="view hidden" id="view-cargar">
+    <div class="seg" id="seg-tipo">
+      <button data-val="gasto" onclick="setTipo('gasto')" class="active">Gasto</button>
+      <button data-val="ingreso" onclick="setTipo('ingreso')">Ingreso</button>
+    </div>
     <div class="cargar-header">
       <h2 id="cargar-modo-titulo">Cargar gasto</h2>
       <button type="button" class="mode-link" id="btn-modo-consultorio" onclick="toggleModoConsultorio()">🩺 Consultorio</button>
@@ -205,13 +214,18 @@
         <div class="field"><label>Corresponde a Lucas</label><input type="number" id="f-corresponde-lucas" placeholder="0"></div>
       </div>
     </div>
-    <button class="submit-btn" onclick="guardarGasto()">Guardar</button>
+    <button class="submit-btn" onclick="guardarMovimiento()">Guardar</button>
   </div>
+
 
   <!-- MOVIMIENTOS -->
   <div class="view hidden" id="view-movimientos">
     <h2>Movimientos</h2>
-    <div class="filters">
+    <div class="seg" id="seg-mv-tipo">
+      <button data-val="gasto" onclick="setMvTipo('gasto')" class="active">Gastos</button>
+      <button data-val="ingreso" onclick="setMvTipo('ingreso')">Ingresos</button>
+    </div>
+    <div class="filters" id="mv-filtros-gasto">
       <select id="mv-seccion" onchange="renderMovimientos()">
         <option value="">Todas las secciones</option>
         <option value="personal">Personal</option>
@@ -219,6 +233,9 @@
         <option value="consultorio">Consultorio</option>
       </select>
       <select id="mv-mes" onchange="renderMovimientos()"></select>
+    </div>
+    <div class="filters hidden" id="mv-filtros-ingreso">
+      <select id="mv-mes-ing" onchange="renderMovimientos()"></select>
     </div>
     <div id="mov-list"></div>
   </div>
@@ -287,17 +304,21 @@ if(!LOCAL_MODE){
 const CATEGORIAS = {
   personal: ["Super/Chino","Salidas a comer","Delivery","Comida día a día","Comidas con amigos en casa","Boliche","Cine","Varios propio","Peajes","Estacionamiento","Nafta","Seguro auto","Ahorro/Inversión","Dietética","Salud/médicos","Fútbol","Herramientas/Apps","Tecnología","Ropa","Boludeces","Tarjetas","Viajes","Kiosco","Carnicería","Verdulería","Regalos","Vivienda","Alcohol","Service","Otros"],
   compartido: ["Comida","Salidas","Delivery","Regalos","Viajes","Casa","Salud","Otros"],
-  consultorio: ["Impuestos kine","Insumos","Alquiler consultorio","Software/Apps","Marketing","Otros consultorio"]
+  consultorio: ["Impuestos kine","Insumos","Alquiler consultorio","Software/Apps","Marketing","Otros consultorio"],
+  ingreso: ["Sueldo QAC","Sueldo FAA","Kinesio particular","Otros","Devoluciones"]
 };
 const SECCION_LABEL = {personal:"Personal", compartido:"Con Vicky", consultorio:"Consultorio"};
 
 /* ---------- Estado ---------- */
-let DB = { gastos: {} };
+let DB = { gastos: {}, ingresos: {} };
 let currentUser = null;
 let seccionActual = "personal";
+let tipoActual = "gasto";
 
 /* ---------- Semilla (importado de PDFs) ---------- */
 const SEED = [{"fecha": "2026-06-01", "monto": 8000, "desc": "Estacionamiento", "categoria": "Estacionamiento", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-01", "monto": 12350, "desc": "Farmacia", "categoria": "Salud/medicos", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-04", "monto": 5000, "desc": "Uber", "categoria": "Estacionamiento", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-02", "monto": 28900, "desc": "Claude", "categoria": "Herramientas/Apps", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-02", "monto": 8562, "desc": "Tarjeta", "categoria": "Tarjetas", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-04", "monto": 21995, "desc": "Farmacia vicky", "categoria": "Salud/medicos", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": true}, {"fecha": "2026-06-05", "monto": 10100, "desc": "Pan rallado y agua", "categoria": "Super/Chino", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-03", "monto": 20600, "desc": "Carne para bife", "categoria": "Carniceria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-05", "monto": 82000, "desc": "Tanque lleno ypf", "categoria": "Nafta", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-05", "monto": 8000, "desc": "Estacionamiento", "categoria": "Estacionamiento", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-05", "monto": 69000, "desc": "Figus", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-05", "monto": 50000, "desc": "Psico", "categoria": "Salud/medicos", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-07", "monto": 165000, "desc": "Estacionamiento rincon", "categoria": "Estacionamiento", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-08", "monto": 9000, "desc": "Estacionamiento gym", "categoria": "Estacionamiento", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-06", "monto": 20600, "desc": "Empanadas", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-07", "monto": 11625, "desc": "Panaderia", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-07", "monto": 90000, "desc": "Pizzas siamo brato", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-08", "monto": 211775, "desc": "Patente 2026", "categoria": "Seguro auto", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-10", "monto": 58000, "desc": "Tordo", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-10", "monto": 88338, "desc": "COKIBA", "categoria": "Impuestos kine", "seccion": "consultorio", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-15", "monto": 14250, "desc": "Arandanos", "categoria": "Dietetica", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-11", "monto": 254600, "desc": "Service", "categoria": "Service", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-12", "monto": 50000, "desc": "Juan", "categoria": "Salud/medicos", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-15", "monto": 38322, "desc": "Asado", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-13", "monto": 40000, "desc": "Hamburguesas", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-14", "monto": 20000, "desc": "Bet", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-16", "monto": 156078, "desc": "Caja de kine", "categoria": "Impuestos kine", "seccion": "consultorio", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-16", "monto": 10000, "desc": "Bet", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-17", "monto": 41000, "desc": "Cena scaloneta", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-17", "monto": 10300, "desc": "Leche y yogurt", "categoria": "Super/Chino", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-17", "monto": 8000, "desc": "Verduleria", "categoria": "Verduleria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-17", "monto": 16700, "desc": "Postre", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-18", "monto": 732500, "desc": "Ahorro cocos", "categoria": "Ahorro/Inversion", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-20", "monto": 20000, "desc": "A vicky", "categoria": "Regalos", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": true}, {"fecha": "2026-06-20", "monto": 52232, "desc": "06/2026", "categoria": "Impuestos kine", "seccion": "consultorio", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-22", "monto": 231672, "desc": "Telepase", "categoria": "Peajes", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-22", "monto": 126544, "desc": "Seguro 05/2026", "categoria": "Seguro auto", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-21", "monto": 1890, "desc": "Negroni", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-23", "monto": 20000, "desc": "Pelu", "categoria": "Varios propio", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-23", "monto": 2521916, "desc": "Ahorro 06/2026", "categoria": "Ahorro/Inversion", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-24", "monto": 2500, "desc": "Ferreteria", "categoria": "Vivienda", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-24", "monto": 50000, "desc": "Prode", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-25", "monto": 43299, "desc": "Mcdonalds", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-28", "monto": 31300, "desc": "Almuerzo favaloro", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-28", "monto": 18237, "desc": "Franui", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-29", "monto": 41000, "desc": "Cena scaloneta", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-29", "monto": 60000, "desc": "Siamo brato", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-28", "monto": 20000, "desc": "Bet", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-22", "monto": 58064, "desc": "Ypf", "categoria": "Nafta", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-16", "monto": 67050, "desc": "Ypf", "categoria": "Nafta", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-26", "monto": 33190, "desc": "Pizza", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-30", "monto": 18200, "desc": "Granola", "categoria": "Dietetica", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-30", "monto": 10800, "desc": "Fruta congelada", "categoria": "Dietetica", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-02", "monto": 30100, "desc": "Claude", "categoria": "Tecnologia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-02", "monto": 8928, "desc": "Comisiones", "categoria": "Tarjetas", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-03", "monto": 36900, "desc": "Carniceria", "categoria": "Carniceria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-03", "monto": 3760, "desc": "Verduleria", "categoria": "Verduleria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-03", "monto": 15599, "desc": "Cena scaloneta", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-06", "monto": 97008, "desc": "Nafta", "categoria": "Nafta", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-06", "monto": 31000, "desc": "Almuerzo nizuc", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-06", "monto": 16880, "desc": "Carniceria", "categoria": "Carniceria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-07", "monto": 11269, "desc": "Leche y yogur", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-07", "monto": 17000, "desc": "Almuerzo scaloneta", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-07", "monto": 20000, "desc": "Pechuga y tarta", "categoria": "Carniceria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-13", "monto": 11420, "desc": "Pampas", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-10", "monto": 5000, "desc": "Bet", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 28560, "desc": "Cebolla", "categoria": "Regalos", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 142307, "desc": "Telepase 06/2026", "categoria": "Peajes", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 131119, "desc": "Seguro auto 06/2026", "categoria": "Seguro auto", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 38800, "desc": "Cinepolis", "categoria": "Cine", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-10", "monto": 31500, "desc": "Bnn", "categoria": "Boliche", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 77600, "desc": "Almuerzo", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-12", "monto": 90025, "desc": "Ypf", "categoria": "Nafta", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 25000, "desc": "Parolaccia", "categoria": "Salidas a comer", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 14750, "desc": "Helado", "categoria": "Salidas a comer", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 5000, "desc": "Estacionamiento", "categoria": "Estacionamiento", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-14", "monto": 39358, "desc": "Verdu carni chino", "categoria": "Carniceria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 41649, "desc": "Compras ml china", "categoria": "Varios propio", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 31830, "desc": "Almuerzo scaloneta", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 26663, "desc": "Cena scaloneta", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 35399, "desc": "Mcdonalds vicky", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": true}, {"fecha": "2026-07-15", "monto": 52232, "desc": "ARCA 07/2026", "categoria": "Impuestos kine", "seccion": "consultorio", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-22", "monto": 84851, "desc": "Caja kine 06/2026", "categoria": "Impuestos kine", "seccion": "consultorio", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-22", "monto": 69710, "desc": "Caja kine 5/6", "categoria": "Impuestos kine", "seccion": "consultorio", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-22", "monto": 44532, "desc": "Cokiba 07/2026", "categoria": "Impuestos kine", "seccion": "consultorio", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-21", "monto": 45950, "desc": "Asado fin del mundo", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-21", "monto": 20000, "desc": "Cena tocho", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-21", "monto": 30200, "desc": "Merienda vicky", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": true}, {"fecha": "2026-07-21", "monto": 3600, "desc": "Verdu", "categoria": "Verduleria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 32000, "desc": "Patas", "categoria": "Super/Chino", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 30000, "desc": "Sin descripcion", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 20000, "desc": "Sin descripcion", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 2840, "desc": "Verdu", "categoria": "Verduleria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 12900, "desc": "Havanna", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 8400, "desc": "Freddo", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-27", "monto": 9300, "desc": "Chino", "categoria": "Super/Chino", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 2300, "desc": "Verdu", "categoria": "Verduleria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-08-01", "monto": 40000, "desc": "Hamburguesas", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-08-01", "monto": 58036, "desc": "Infinia lleno", "categoria": "Nafta", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-08-01", "monto": 19000, "desc": "Chino", "categoria": "Super/Chino", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-08-02", "monto": 9950, "desc": "Budin", "categoria": "Super/Chino", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-04-15", "monto": 158891, "desc": "Total feb-may (agregado, importado)", "categoria": "Super/Chino", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 646756, "desc": "Total feb-may (agregado, importado)", "categoria": "Salidas a comer", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 73350, "desc": "Total feb-may (agregado, importado)", "categoria": "Delivery", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 675600, "desc": "Total feb-may (agregado, importado)", "categoria": "Comida dia a dia", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 145800, "desc": "Total feb-may (agregado, importado)", "categoria": "Comidas con amigos en casa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 105250, "desc": "Total feb-may (agregado, importado)", "categoria": "Boliche", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 594120, "desc": "Total feb-may (agregado, importado)", "categoria": "Peajes", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 441333, "desc": "Total feb-may (agregado, importado)", "categoria": "Estacionamiento", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 522566, "desc": "Total feb-may (agregado, importado)", "categoria": "Nafta", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 2208007, "desc": "Total feb-may (agregado, importado)", "categoria": "Seguro auto", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 3567300, "desc": "Total feb-may (agregado, importado)", "categoria": "Ahorro/Inversion", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 600500, "desc": "Total feb-may (agregado, importado)", "categoria": "Salud/medicos", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 25000, "desc": "Total feb-may (agregado, importado)", "categoria": "Futbol", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 153362, "desc": "Total feb-may (agregado, importado)", "categoria": "Herramientas/Apps", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 232563, "desc": "Total feb-may (agregado, importado)", "categoria": "Ropa", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 165570, "desc": "Total feb-may (agregado, importado)", "categoria": "Boludeces", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 43508, "desc": "Total feb-may (agregado, importado)", "categoria": "Tarjetas", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 144248, "desc": "Total feb-may (agregado, importado)", "categoria": "Viajes", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 3100, "desc": "Total feb-may (agregado, importado)", "categoria": "Kiosco", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 13978, "desc": "Total feb-may (agregado, importado)", "categoria": "Carniceria", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 1332540, "desc": "Total feb-may (agregado, importado)", "categoria": "Impuestos kine", "seccion": "consultorio", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 114788, "desc": "Total feb-may (agregado, importado)", "categoria": "Regalos", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 722107, "desc": "Total feb-may (agregado, importado)", "categoria": "Vivienda", "seccion": "personal", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}];
+
+const SEED_INGRESOS = [{"fecha": "2026-06-02", "monto": 80000, "desc": "Sofia y baltu", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-05", "monto": 116000, "desc": "Docke", "categoria": "Otros", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-01", "monto": 1034901, "desc": "Sueldo FAA 05/2026", "categoria": "Sueldo FAA", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-04", "monto": 60000, "desc": "Sofia y joaco", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-08", "monto": 150000, "desc": "Nasif batista", "categoria": "Otros", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-08", "monto": 50000, "desc": "Regalo paciente", "categoria": "Otros", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-09", "monto": 160000, "desc": "Irene, georgina, sofia y maro", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-11", "monto": 180000, "desc": "Nico sofia irene georgina", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-16", "monto": 80000, "desc": "Sofia e Irene", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-18", "monto": 80000, "desc": "Gise y pellegrino", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-06-19", "monto": 1800000, "desc": "Sueldo QAC 04/2026", "categoria": "Sueldo QAC", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-01", "monto": 1800730, "desc": "Sueldo FAA 07/2026 + Aguinaldo", "categoria": "Sueldo FAA", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-02", "monto": 70000, "desc": "Kolu y manu", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-04", "monto": 40000, "desc": "Tomi", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-13", "monto": 150000, "desc": "Docke 1/2", "categoria": "Otros", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-15", "monto": 1160000, "desc": "Vicky pago", "categoria": "Otros", "usuario": "Lucas", "revisar_vicky": true}, {"fecha": "2026-07-20", "monto": 40000, "desc": "Tomi", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-07-30", "monto": 80000, "desc": "Laura y maro", "categoria": "Kinesio particular", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-08-01", "monto": 1144506, "desc": "Sueldo FAA 07/2026", "categoria": "Sueldo FAA", "usuario": "Lucas", "revisar_vicky": false}, {"fecha": "2026-04-15", "monto": 6150000, "desc": "Total feb-may (agregado, importado)", "categoria": "Sueldo QAC", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}, {"fecha": "2026-04-15", "monto": 3534892, "desc": "Total feb-may (agregado, importado)", "categoria": "Sueldo FAA", "usuario": "Lucas", "revisar_vicky": false, "agregado": true}];
 
 /* ---------- Login ---------- */
 function selectWho(who){
@@ -321,20 +342,23 @@ function tryLogin(){
 function initApp(){
   if(LOCAL_MODE){
     const stored = localStorage.getItem('libroGastos');
-    DB = stored ? JSON.parse(stored) : { gastos:{} };
-    if(Object.keys(DB.gastos||{}).length === 0){ seedIfEmpty(); } else { afterDataLoad(); }
+    DB = stored ? JSON.parse(stored) : { gastos:{}, ingresos:{} };
+    if(!DB.ingresos) DB.ingresos = {};
+    if(Object.keys(DB.gastos||{}).length === 0 && Object.keys(DB.ingresos||{}).length === 0){ seedIfEmpty(); } else { afterDataLoad(); }
   } else {
     dbRef.once('value').then(snap=>{
-      DB = snap.val() || { gastos:{} };
+      DB = snap.val() || { gastos:{}, ingresos:{} };
       if(!DB.gastos) DB.gastos = {};
-      if(Object.keys(DB.gastos).length === 0){ seedIfEmpty(); }
+      if(!DB.ingresos) DB.ingresos = {};
+      if(Object.keys(DB.gastos).length === 0 && Object.keys(DB.ingresos).length === 0){ seedIfEmpty(); }
       else { afterDataLoad(); }
-      dbRef.on('value', snap2=>{ DB = snap2.val() || {gastos:{}}; if(!DB.gastos) DB.gastos={}; afterDataLoad(); });
+      dbRef.on('value', snap2=>{ DB = snap2.val() || {gastos:{},ingresos:{}}; if(!DB.gastos) DB.gastos={}; if(!DB.ingresos) DB.ingresos={}; afterDataLoad(); });
     });
   }
 }
 function seedIfEmpty(){
   DB.gastos = DB.gastos || {};
+  DB.ingresos = DB.ingresos || {};
   SEED.forEach((e,i)=>{
     const id = 'seed_' + i;
     DB.gastos[id] = {
@@ -347,6 +371,14 @@ function seedIfEmpty(){
       DB.gastos[id].splitType = '50-50';
       DB.gastos[id].correspondeLucas = e.monto/2;
     }
+  });
+  SEED_INGRESOS.forEach((e,i)=>{
+    const id = 'ing_seed_' + i;
+    DB.ingresos[id] = {
+      fecha: e.fecha, monto: e.monto, desc: e.desc,
+      categoria: e.categoria, usuario: e.usuario, revisarVicky: e.revisar_vicky || false,
+      agregado: e.agregado || false
+    };
   });
   persist();
   afterDataLoad();
@@ -377,14 +409,34 @@ let esCompartido = false;
 const TOP_N_CHIPS = 8;
 CATEGORIAS.compartido = CATEGORIAS.personal; // gastos en conjunto usan las mismas categorías que los personales
 
-function categoriasOrdenadasPorUso(seccion){
+function claveActual(){ return tipoActual === 'ingreso' ? 'ingreso' : seccionActual; }
+function categoriasOrdenadasPorUso(clave){
   const freq = {};
-  todosGastos().filter(g=>g.seccion===seccion).forEach(g=>{ freq[g.categoria] = (freq[g.categoria]||0) + 1; });
-  const todas = CATEGORIAS[seccion].slice();
+  const datos = clave === 'ingreso' ? todosIngresos() : todosGastos().filter(g=>g.seccion===clave);
+  datos.forEach(g=>{ freq[g.categoria] = (freq[g.categoria]||0) + 1; });
+  const todas = CATEGORIAS[clave].slice();
   todas.sort((a,b)=> (freq[b]||0) - (freq[a]||0));
   return todas;
 }
+function setTipo(tipo){
+  tipoActual = tipo;
+  seccionActual = 'personal';
+  mostrandoTodas = false;
+  categoriaSeleccionada = null;
+  esCompartido = false;
+  document.getElementById('f-compartido').checked = false;
+  document.querySelectorAll('#seg-tipo button').forEach(b=>b.classList.toggle('active', b.dataset.val===tipo));
+  const esIngreso = tipo === 'ingreso';
+  document.getElementById('cargar-modo-titulo').textContent = esIngreso ? 'Cargar ingreso' : 'Cargar gasto';
+  document.getElementById('btn-modo-consultorio').classList.toggle('hidden', esIngreso);
+  document.getElementById('btn-modo-consultorio').textContent = '🩺 Consultorio';
+  document.getElementById('btn-modo-consultorio').classList.remove('active');
+  document.getElementById('compartido-check-row').classList.toggle('hidden', esIngreso);
+  document.getElementById('split-box').classList.add('hidden');
+  renderCatChips();
+}
 function toggleModoConsultorio(){
+  if(tipoActual === 'ingreso') return;
   seccionActual = seccionActual === 'consultorio' ? 'personal' : 'consultorio';
   mostrandoTodas = false;
   categoriaSeleccionada = null;
@@ -405,7 +457,8 @@ function toggleCompartido(){
   document.getElementById('split-box').classList.toggle('hidden', !esCompartido);
 }
 function renderCatChips(){
-  const ordenadas = categoriasOrdenadasPorUso(seccionActual);
+  const clave = claveActual();
+  const ordenadas = categoriasOrdenadasPorUso(clave);
   const lista = mostrandoTodas ? ordenadas : ordenadas.slice(0, TOP_N_CHIPS);
   const cont = document.getElementById('cat-chips');
   cont.innerHTML = lista.map(c=>
@@ -426,7 +479,7 @@ function elegirCategoria(c){
 function nuevaCategoria(){
   const nueva = prompt('Nombre de la nueva categoría:');
   if(nueva && nueva.trim()){
-    CATEGORIAS[seccionActual].push(nueva.trim());
+    CATEGORIAS[claveActual()].push(nueva.trim());
     categoriaSeleccionada = nueva.trim();
     renderCatChips();
     document.getElementById('f-monto').focus();
@@ -436,12 +489,15 @@ function prepCargarForm(){
   document.getElementById('f-fecha').value = new Date().toISOString().slice(0,10);
   document.getElementById('f-monto').value = '';
   document.getElementById('f-desc').value = '';
+  tipoActual = 'gasto';
+  document.querySelectorAll('#seg-tipo button').forEach(b=>b.classList.toggle('active', b.dataset.val==='gasto'));
   seccionActual = 'personal';
   esCompartido = false;
   document.getElementById('f-compartido').checked = false;
   document.getElementById('cargar-modo-titulo').textContent = 'Cargar gasto';
   document.getElementById('btn-modo-consultorio').textContent = '🩺 Consultorio';
   document.getElementById('btn-modo-consultorio').classList.remove('active');
+  document.getElementById('btn-modo-consultorio').classList.remove('hidden');
   document.getElementById('compartido-check-row').classList.remove('hidden');
   document.getElementById('split-box').classList.add('hidden');
   categoriaSeleccionada = null;
@@ -458,7 +514,7 @@ function toggleCustomSplit(){
   const isCustom = document.getElementById('f-split').value === 'custom';
   document.getElementById('custom-split-row').classList.toggle('hidden', !isCustom);
 }
-function guardarGasto(){
+function guardarMovimiento(){
   const monto = parseFloat(document.getElementById('f-monto').value);
   const desc = document.getElementById('f-desc').value.trim();
   const fecha = document.getElementById('f-fecha').value;
@@ -466,6 +522,14 @@ function guardarGasto(){
   if(!categoria){ alert('Elegí una categoría'); return; }
   if(!monto || monto<=0){ alert('Poné un monto válido'); return; }
   if(!fecha){ alert('Poné una fecha'); return; }
+  if(tipoActual === 'ingreso'){
+    const id = 'i' + Date.now();
+    DB.ingresos[id] = { fecha, monto, desc: desc || categoria, categoria, usuario: currentUser };
+    persist();
+    afterDataLoad();
+    showView('inicio');
+    return;
+  }
   const finalSeccion = seccionActual === 'consultorio' ? 'consultorio' : (esCompartido ? 'compartido' : 'personal');
   const id = 'g' + Date.now();
   const entry = { seccion: finalSeccion, fecha, monto, desc: desc || categoria, categoria, usuario: currentUser };
@@ -491,6 +555,7 @@ function mesLabel(key){
   return meses[parseInt(m)-1] + ' ' + y;
 }
 function todosGastos(){ return Object.entries(DB.gastos||{}).map(([id,g])=>({id,...g})); }
+function todosIngresos(){ return Object.entries(DB.ingresos||{}).map(([id,g])=>({id,...g})); }
 
 /* ---------- Alertas ---------- */
 function renderAlertas(){
@@ -534,6 +599,13 @@ function renderInicio(){
     secc.innerHTML += `<div class="sec-total"><span class="name">${SECCION_LABEL[s]}</span><span class="amt">${fmt(t)}</span></div>`;
   });
 
+  const ingresosDelMes = todosIngresos().filter(g=>mesKey(g.fecha)===hoyKey).reduce((a,g)=>a+g.monto,0);
+  document.getElementById('inicio-ingresos').textContent = fmt(ingresosDelMes);
+  const neto = ingresosDelMes - total;
+  const netoEl = document.getElementById('inicio-neto');
+  netoEl.textContent = (neto >= 0 ? '+' : '−') + fmt(Math.abs(neto));
+  netoEl.style.color = neto >= 0 ? 'var(--green)' : 'var(--red)';
+
   const byCat = {};
   delMes.forEach(g=>{ byCat[g.categoria] = (byCat[g.categoria]||0) + g.monto; });
   const entries = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,8);
@@ -555,6 +627,14 @@ function renderInicio(){
 }
 
 /* ---------- Movimientos ---------- */
+let mvTipo = 'gasto';
+function setMvTipo(tipo){
+  mvTipo = tipo;
+  document.querySelectorAll('#seg-mv-tipo button').forEach(b=>b.classList.toggle('active', b.dataset.val===tipo));
+  document.getElementById('mv-filtros-gasto').classList.toggle('hidden', tipo!=='gasto');
+  document.getElementById('mv-filtros-ingreso').classList.toggle('hidden', tipo!=='ingreso');
+  renderMovimientos();
+}
 function populateMesFilter(){
   const sel = document.getElementById('mv-mes');
   const gastos = todosGastos();
@@ -562,16 +642,41 @@ function populateMesFilter(){
   const current = sel.value;
   sel.innerHTML = '<option value="">Todos los meses</option>' + meses.map(m=>`<option value="${m}">${mesLabel(m)}</option>`).join('');
   if(meses.includes(current)) sel.value = current;
+
+  const selIng = document.getElementById('mv-mes-ing');
+  const mesesIng = [...new Set(todosIngresos().map(g=>mesKey(g.fecha)))].sort().reverse();
+  const currentIng = selIng.value;
+  selIng.innerHTML = '<option value="">Todos los meses</option>' + mesesIng.map(m=>`<option value="${m}">${mesLabel(m)}</option>`).join('');
+  if(mesesIng.includes(currentIng)) selIng.value = currentIng;
 }
 function renderMovimientos(){
   populateMesFilter();
+  const list = document.getElementById('mov-list');
+  if(mvTipo === 'ingreso'){
+    const mesFiltro = document.getElementById('mv-mes-ing').value;
+    let ingresos = todosIngresos();
+    if(mesFiltro) ingresos = ingresos.filter(g=>mesKey(g.fecha)===mesFiltro);
+    ingresos.sort((a,b)=> b.fecha.localeCompare(a.fecha));
+    if(ingresos.length === 0){ list.innerHTML = '<div class="empty-state">No hay ingresos para este filtro.</div>'; return; }
+    list.innerHTML = ingresos.map(g=>{
+      const flag = g.revisarVicky ? '<span class="tag">revisar Vicky?</span>' : '';
+      const agregado = g.agregado ? '<span class="tag">agregado</span>' : '';
+      return `<div class="mov-item" onclick="abrirEdicionIngreso('${g.id}')">
+        <div class="left">
+          <div class="desc">${g.desc}${flag}${agregado}</div>
+          <div class="meta">${g.fecha} · ${g.categoria}</div>
+        </div>
+        <div class="amt" style="color:var(--green);">+${fmt(g.monto)}</div>
+      </div>`;
+    }).join('');
+    return;
+  }
   const seccFiltro = document.getElementById('mv-seccion').value;
   const mesFiltro = document.getElementById('mv-mes').value;
   let gastos = todosGastos();
   if(seccFiltro) gastos = gastos.filter(g=>g.seccion===seccFiltro);
   if(mesFiltro) gastos = gastos.filter(g=>mesKey(g.fecha)===mesFiltro);
   gastos.sort((a,b)=> b.fecha.localeCompare(a.fecha));
-  const list = document.getElementById('mov-list');
   if(gastos.length === 0){ list.innerHTML = '<div class="empty-state">No hay movimientos para este filtro.</div>'; return; }
   list.innerHTML = gastos.map(g=>{
     const flag = g.revisarVicky ? '<span class="tag">revisar Vicky?</span>' : '';
@@ -626,6 +731,44 @@ function borrarGasto(id){
   afterDataLoad();
   cerrarModal();
 }
+function abrirEdicionIngreso(id){
+  const g = DB.ingresos[id];
+  if(!g) return;
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <h3>Editar ingreso</h3>
+        <div class="field"><label>Fecha</label><input type="date" id="e-fecha" value="${g.fecha}"></div>
+        <div class="field"><label>Monto</label><input type="number" id="e-monto" value="${g.monto}"></div>
+        <div class="field"><label>Descripción</label><input type="text" id="e-desc" value="${g.desc.replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>Categoría</label>
+          <select id="e-categoria">${CATEGORIAS.ingreso.map(c=>`<option ${c===g.categoria?'selected':''}>${c}</option>`).join('')}</select>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-danger" onclick="borrarIngreso('${id}')">Eliminar</button>
+          <button class="btn-save" onclick="guardarEdicionIngreso('${id}')">Guardar</button>
+        </div>
+      </div>
+    </div>`;
+}
+function guardarEdicionIngreso(id){
+  DB.ingresos[id].fecha = document.getElementById('e-fecha').value;
+  DB.ingresos[id].monto = parseFloat(document.getElementById('e-monto').value);
+  DB.ingresos[id].desc = document.getElementById('e-desc').value;
+  DB.ingresos[id].categoria = document.getElementById('e-categoria').value;
+  DB.ingresos[id].revisarVicky = false;
+  persist();
+  afterDataLoad();
+  cerrarModal();
+}
+function borrarIngreso(id){
+  if(!confirm('¿Eliminar este ingreso?')) return;
+  delete DB.ingresos[id];
+  persist();
+  afterDataLoad();
+  cerrarModal();
+}
 
 /* ---------- Balance ---------- */
 function calcBalance(){
@@ -668,29 +811,41 @@ function renderBalance(){
 let chartAnual = null;
 function renderAnual(){
   const gastos = todosGastos().filter(g=>g.seccion !== 'consultorio');
+  const ingresos = todosIngresos();
   const year = new Date().getFullYear();
   document.getElementById('anual-titulo').textContent = 'Año ' + year;
   const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
   const totales = new Array(12).fill(0);
+  const totalesIngresos = new Array(12).fill(0);
   gastos.forEach(g=>{
     const [y,m] = g.fecha.split('-');
     if(parseInt(y) === year) totales[parseInt(m)-1] += g.monto;
+  });
+  ingresos.forEach(g=>{
+    const [y,m] = g.fecha.split('-');
+    if(parseInt(y) === year) totalesIngresos[parseInt(m)-1] += g.monto;
   });
   const ctx = document.getElementById('chart-anual');
   if(chartAnual) chartAnual.destroy();
   chartAnual = new Chart(ctx, {
     type:'bar',
-    data:{ labels: meses, datasets:[{ data: totales, backgroundColor: '#C69A3B', borderRadius:4 }] },
-    options:{ plugins:{legend:{display:false}}, scales:{
+    data:{ labels: meses, datasets:[
+      { label:'Gastos', data: totales, backgroundColor: '#C69A3B', borderRadius:4 },
+      { label:'Ingresos', data: totalesIngresos, backgroundColor: '#4C8567', borderRadius:4 }
+    ]},
+    options:{ plugins:{legend:{display:true, position:'bottom', labels:{color:'#B9C2BC', boxWidth:12, font:{size:11}}}}, scales:{
       x:{ ticks:{color:'#B9C2BC', font:{size:11}}, grid:{display:false} },
       y:{ ticks:{color:'#B9C2BC', font:{size:10}}, grid:{color:'#234339'} }
     }}
   });
   const totalAnual = totales.reduce((a,b)=>a+b,0);
+  const totalIngresosAnual = totalesIngresos.reduce((a,b)=>a+b,0);
   const promedio = totalAnual / (totales.filter(t=>t>0).length || 1);
   document.getElementById('anual-totales').innerHTML = `
-    <div class="sec-total"><span class="name">Total del año</span><span class="amt">${fmt(totalAnual)}</span></div>
-    <div class="sec-total"><span class="name">Promedio mensual</span><span class="amt">${fmt(promedio)}</span></div>
+    <div class="sec-total"><span class="name">Total gastado</span><span class="amt">${fmt(totalAnual)}</span></div>
+    <div class="sec-total"><span class="name">Total ingresos</span><span class="amt" style="color:var(--green);">${fmt(totalIngresosAnual)}</span></div>
+    <div class="sec-total"><span class="name">Neto del año</span><span class="amt" style="color:${totalIngresosAnual-totalAnual>=0?'var(--green)':'var(--red)'};">${fmt(totalIngresosAnual-totalAnual)}</span></div>
+    <div class="sec-total"><span class="name">Promedio mensual gastado</span><span class="amt">${fmt(promedio)}</span></div>
   `;
 }
 </script>
