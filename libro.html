@@ -343,15 +343,15 @@ function initApp(){
   if(LOCAL_MODE){
     const stored = localStorage.getItem('libroGastos');
     DB = stored ? JSON.parse(stored) : { gastos:{}, ingresos:{} };
+    if(!DB.gastos) DB.gastos = {};
     if(!DB.ingresos) DB.ingresos = {};
-    if(Object.keys(DB.gastos||{}).length === 0 && Object.keys(DB.ingresos||{}).length === 0){ seedIfEmpty(); } else { afterDataLoad(); }
+    seedIfEmpty();
   } else {
     dbRef.once('value').then(snap=>{
       DB = snap.val() || { gastos:{}, ingresos:{} };
       if(!DB.gastos) DB.gastos = {};
       if(!DB.ingresos) DB.ingresos = {};
-      if(Object.keys(DB.gastos).length === 0 && Object.keys(DB.ingresos).length === 0){ seedIfEmpty(); }
-      else { afterDataLoad(); }
+      seedIfEmpty();
       dbRef.on('value', snap2=>{ DB = snap2.val() || {gastos:{},ingresos:{}}; if(!DB.gastos) DB.gastos={}; if(!DB.ingresos) DB.ingresos={}; afterDataLoad(); });
     });
   }
@@ -359,28 +359,35 @@ function initApp(){
 function seedIfEmpty(){
   DB.gastos = DB.gastos || {};
   DB.ingresos = DB.ingresos || {};
-  SEED.forEach((e,i)=>{
-    const id = 'seed_' + i;
-    DB.gastos[id] = {
-      seccion: e.seccion, fecha: e.fecha, monto: e.monto, desc: e.desc,
-      categoria: e.categoria, usuario: e.usuario, revisarVicky: e.revisar_vicky || false,
-      agregado: e.agregado || false
-    };
-    if(e.seccion === 'compartido'){
-      DB.gastos[id].pagador = e.usuario;
-      DB.gastos[id].splitType = '50-50';
-      DB.gastos[id].correspondeLucas = e.monto/2;
-    }
-  });
-  SEED_INGRESOS.forEach((e,i)=>{
-    const id = 'ing_seed_' + i;
-    DB.ingresos[id] = {
-      fecha: e.fecha, monto: e.monto, desc: e.desc,
-      categoria: e.categoria, usuario: e.usuario, revisarVicky: e.revisar_vicky || false,
-      agregado: e.agregado || false
-    };
-  });
-  persist();
+  let cambio = false;
+  if(Object.keys(DB.gastos).length === 0){
+    SEED.forEach((e,i)=>{
+      const id = 'seed_' + i;
+      DB.gastos[id] = {
+        seccion: e.seccion, fecha: e.fecha, monto: e.monto, desc: e.desc,
+        categoria: e.categoria, usuario: e.usuario, revisarVicky: e.revisar_vicky || false,
+        agregado: e.agregado || false
+      };
+      if(e.seccion === 'compartido'){
+        DB.gastos[id].pagador = e.usuario;
+        DB.gastos[id].splitType = '50-50';
+        DB.gastos[id].correspondeLucas = e.monto/2;
+      }
+    });
+    cambio = true;
+  }
+  if(Object.keys(DB.ingresos).length === 0){
+    SEED_INGRESOS.forEach((e,i)=>{
+      const id = 'ing_seed_' + i;
+      DB.ingresos[id] = {
+        fecha: e.fecha, monto: e.monto, desc: e.desc,
+        categoria: e.categoria, usuario: e.usuario, revisarVicky: e.revisar_vicky || false,
+        agregado: e.agregado || false
+      };
+    });
+    cambio = true;
+  }
+  if(cambio) persist();
   afterDataLoad();
 }
 function persist(){
