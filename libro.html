@@ -1079,6 +1079,17 @@ function misGastos(){
   if(currentUser === 'Conjunto') return todos.filter(g=>g.seccion==='compartido');
   return todos.filter(g=>g.usuario===currentUser && g.seccion!=='compartido');
 }
+/* Para la lista de Movimientos: además de lo personal, mostramos TODOS los gastos en conjunto
+   (los haya cargado quien los haya cargado), para que no "desaparezcan" de la vista de cada uno.
+   Los totales del dashboard siguen usando misGastos() sin compartido, para no duplicar montos. */
+function misGastosParaLista(){
+  if(currentUser === 'Conjunto') return todosGastos().filter(g=>g.seccion==='compartido');
+  return todosGastos().filter(g=>(g.usuario===currentUser && g.seccion!=='compartido') || g.seccion==='compartido');
+}
+function seccionLabelDinamico(seccion){
+  if(seccion === 'compartido') return currentUser === 'Conjunto' ? 'Compartido' : 'Con ' + (currentUser==='Vicky' ? 'Lucas' : 'Vicky');
+  return SECCION_LABEL[seccion] || seccion;
+}
 function misIngresos(){
   if(currentUser === 'Conjunto') return [];
   return todosIngresos().filter(g=>g.usuario===currentUser);
@@ -1225,7 +1236,7 @@ function setMvTipo(tipo){
 }
 function populateMesFilter(){
   const sel = document.getElementById('mv-mes');
-  const gastos = misGastos();
+  const gastos = misGastosParaLista();
   const meses = [...new Set(gastos.map(g=>mesKey(g.fecha)))].sort().reverse();
   const current = sel.value;
   sel.innerHTML = '<option value="">Todos los meses</option>' + meses.map(m=>`<option value="${m}">${mesLabel(m)}</option>`).join('');
@@ -1263,7 +1274,7 @@ function renderMovimientos(){
     return;
   }
   const mesFiltro = document.getElementById('mv-mes').value;
-  let gastos = misGastos();
+  let gastos = misGastosParaLista();
   if(mesFiltro) gastos = gastos.filter(g=>mesKey(g.fecha)===mesFiltro);
   gastos.sort((a,b)=> b.fecha.localeCompare(a.fecha));
   if(gastos.length === 0){ list.innerHTML = '<div class="empty-state">No hay movimientos para este filtro.</div>'; return; }
@@ -1273,7 +1284,7 @@ function renderMovimientos(){
     return `<div class="mov-item" onclick="abrirEdicion('${g.id}')">
       <div class="left">
         <div class="desc">${g.desc}${flag}${agregado}</div>
-        <div class="meta">${g.fecha} · ${g.categoria}${g.subcategoria ? ' › '+g.subcategoria : ''} · <span class="sec-tag ${g.seccion}">${SECCION_LABEL[g.seccion]}</span></div>
+        <div class="meta">${g.fecha} · ${g.categoria}${g.subcategoria ? ' › '+g.subcategoria : ''} · <span class="sec-tag ${g.seccion}">${seccionLabelDinamico(g.seccion)}</span></div>
       </div>
       <div class="amt">${fmt(g.monto)}</div>
     </div>`;
