@@ -347,13 +347,13 @@
    Realtime Database → reglas de lectura/escritura → copiá la config
    ========================================================= */
 const firebaseConfig = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROYECTO.firebaseapp.com",
-  databaseURL: "https://TU_PROYECTO-default-rtdb.firebaseio.com",
-  projectId: "TU_PROYECTO",
-  storageBucket: "TU_PROYECTO.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "TU_APP_ID"
+  apiKey: "AIzaSyCHTwdY7y6xJKioo76ZIU0GtBIcpGsCtLw",
+  authDomain: "gastos-9a064.firebaseapp.com",
+  databaseURL: "https://gastos-9a064-default-rtdb.firebaseio.com",
+  projectId: "gastos-9a064",
+  storageBucket: "gastos-9a064.firebasestorage.app",
+  messagingSenderId: "273975895337",
+  appId: "1:273975895337:web:9a8327d79703bbf3bbc338"
 };
 const APP_PASSWORD = "Gastos2026";
 const LOCAL_MODE = firebaseConfig.apiKey === "TU_API_KEY";
@@ -447,7 +447,21 @@ function initApp(){
       DB = snap.val() || { gastos:{}, ingresos:{} };
       if(!DB.gastos) DB.gastos = {};
       if(!DB.ingresos) DB.ingresos = {};
+      let subioDatosLocales = false;
+      // Primera vez que este dispositivo se conecta a Firebase: si Firebase está vacío pero
+      // este celular ya tenía datos guardados de cuando corría en modo local, los subimos
+      // para no perder nada de lo que se cargó antes de configurar Firebase.
+      if(Object.keys(DB.gastos).length === 0 && Object.keys(DB.ingresos).length === 0){
+        const local = localStorage.getItem('libroGastos');
+        if(local){
+          const localDB = JSON.parse(local);
+          if(localDB.gastos && Object.keys(localDB.gastos).length > 0){ DB.gastos = localDB.gastos; subioDatosLocales = true; }
+          if(localDB.ingresos && Object.keys(localDB.ingresos).length > 0){ DB.ingresos = localDB.ingresos; subioDatosLocales = true; }
+          if(localDB._seedAgregadoVersion) DB._seedAgregadoVersion = localDB._seedAgregadoVersion;
+        }
+      }
       seedIfEmpty();
+      if(subioDatosLocales) persist();
       migrarAgregados();
       dbRef.on('value', snap2=>{ DB = snap2.val() || {gastos:{},ingresos:{}}; if(!DB.gastos) DB.gastos={}; if(!DB.ingresos) DB.ingresos={}; afterDataLoad(); });
     });
