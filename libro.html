@@ -947,6 +947,8 @@ function renderMovimientos(){
 function abrirEdicion(id){
   const g = DB.gastos[id];
   if(!g) return;
+  const esConsultorio = g.seccion === 'consultorio';
+  const esCompartidoAhora = g.seccion === 'compartido';
   const root = document.getElementById('modal-root');
   root.innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
@@ -958,6 +960,31 @@ function abrirEdicion(id){
         <div class="field"><label>Categoría</label>
           <select id="e-categoria">${CATEGORIAS[g.seccion].map(c=>`<option ${c===g.categoria?'selected':''}>${c}</option>`).join('')}</select>
         </div>
+        ${esConsultorio ? '' : `
+        <label class="check-row" id="e-compartido-check-row">
+          <input type="checkbox" id="e-compartido" ${esCompartidoAhora?'checked':''} onchange="toggleEdicionCompartido('${id}')">
+          <span>Es un gasto en conjunto con Vicky</span>
+        </label>
+        <div id="e-split-box" class="split-box ${esCompartidoAhora?'':'hidden'}">
+          <div class="field" style="margin-bottom:10px;">
+            <label>¿Quién pagó?</label>
+            <select id="e-pagador">
+              <option ${g.pagador==='Lucas'?'selected':''}>Lucas</option>
+              <option ${g.pagador==='Vicky'?'selected':''}>Vicky</option>
+              <option ${g.pagador==='Ambos'?'selected':''}>Ambos (50/50)</option>
+            </select>
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>¿Cómo se divide?</label>
+            <select id="e-split" onchange="toggleEdicionCustomSplit()">
+              <option value="50-50" ${g.splitType!=='custom'?'selected':''}>50 / 50</option>
+              <option value="custom" ${g.splitType==='custom'?'selected':''}>Monto personalizado</option>
+            </select>
+          </div>
+          <div class="split-row ${g.splitType==='custom'?'':'hidden'}" id="e-custom-split-row" style="margin-top:10px;">
+            <div class="field"><label>Corresponde a Lucas</label><input type="number" id="e-corresponde-lucas" value="${g.correspondeLucas!=null?g.correspondeLucas:g.monto/2}"></div>
+          </div>
+        </div>`}
         <div class="modal-actions">
           <button class="btn-danger" onclick="borrarGasto('${id}')">Eliminar</button>
           <button class="btn-save" onclick="guardarEdicion('${id}')">Guardar</button>
@@ -965,13 +992,42 @@ function abrirEdicion(id){
       </div>
     </div>`;
 }
+function toggleEdicionCompartido(id){
+  const g = DB.gastos[id];
+  const marcado = document.getElementById('e-compartido').checked;
+  document.getElementById('e-split-box').classList.toggle('hidden', !marcado);
+  const seccionCat = marcado ? 'compartido' : (g.seccion === 'compartido' ? 'personal' : g.seccion);
+  const sel = document.getElementById('e-categoria');
+  const actual = sel.value;
+  sel.innerHTML = CATEGORIAS[seccionCat].map(c=>`<option ${c===actual?'selected':''}>${c}</option>`).join('');
+}
+function toggleEdicionCustomSplit(){
+  const isCustom = document.getElementById('e-split').value === 'custom';
+  document.getElementById('e-custom-split-row').classList.toggle('hidden', !isCustom);
+}
 function cerrarModal(){ document.getElementById('modal-root').innerHTML = ''; }
 function guardarEdicion(id){
-  DB.gastos[id].fecha = document.getElementById('e-fecha').value;
-  DB.gastos[id].monto = parseFloat(document.getElementById('e-monto').value);
-  DB.gastos[id].desc = document.getElementById('e-desc').value;
-  DB.gastos[id].categoria = document.getElementById('e-categoria').value;
-  DB.gastos[id].revisarVicky = false;
+  const g = DB.gastos[id];
+  const eraCompartido = g.seccion === 'compartido';
+  const esConsultorio = g.seccion === 'consultorio';
+  g.fecha = document.getElementById('e-fecha').value;
+  g.monto = parseFloat(document.getElementById('e-monto').value);
+  g.desc = document.getElementById('e-desc').value;
+  g.categoria = document.getElementById('e-categoria').value;
+  g.revisarVicky = false;
+  if(!esConsultorio){
+    const marcado = document.getElementById('e-compartido').checked;
+    if(marcado){
+      g.seccion = 'compartido';
+      g.pagador = document.getElementById('e-pagador').value.startsWith('Ambos') ? 'Ambos' : document.getElementById('e-pagador').value;
+      const splitType = document.getElementById('e-split').value;
+      g.splitType = splitType;
+      g.correspondeLucas = splitType === '50-50' ? g.monto/2 : (parseFloat(document.getElementById('e-corresponde-lucas').value) || g.monto/2);
+    } else {
+      g.seccion = 'personal';
+      if(eraCompartido){ delete g.pagador; delete g.splitType; delete g.correspondeLucas; }
+    }
+  }
   persist();
   afterDataLoad();
   cerrarModal();
