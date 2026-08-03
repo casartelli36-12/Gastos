@@ -1072,16 +1072,22 @@ function mesLabel(key){
 }
 function todosGastos(){ return Object.entries(DB.gastos||{}).map(([id,g])=>({id,...g})); }
 function todosIngresos(){ return Object.entries(DB.ingresos||{}).map(([id,g])=>({id,...g})); }
-/* Datos filtrados según el perfil logueado: Lucas/Vicky ven solo lo suyo (personal);
-   Conjunto ve solo los gastos compartidos entre ambos. */
+/* Datos filtrados según el perfil logueado: Lucas/Vicky ven lo suyo personal MÁS lo que
+   ellos mismos pagaron de los gastos en conjunto (si pagaste vos, esa plata salió de tu
+   bolsillo y tiene que contar en tu total). El balance con el otro se sigue viendo aparte,
+   entrando como "Conjunto". Si el pagador fue "Ambos", se cuenta la mitad para cada uno. */
 function misGastos(){
   const todos = todosGastos();
   if(currentUser === 'Conjunto') return todos.filter(g=>g.seccion==='compartido');
-  return todos.filter(g=>g.usuario===currentUser && g.seccion!=='compartido');
+  const propios = todos.filter(g=>g.seccion==='personal' && g.usuario===currentUser);
+  const compartidosQuePague = todos
+    .filter(g=>g.seccion==='compartido' && (g.pagador===currentUser || g.pagador==='Ambos'))
+    .map(g=> g.pagador==='Ambos' ? {...g, monto: g.monto/2} : g);
+  return propios.concat(compartidosQuePague);
 }
 /* Para la lista de Movimientos: además de lo personal, mostramos TODOS los gastos en conjunto
    (los haya cargado quien los haya cargado), para que no "desaparezcan" de la vista de cada uno.
-   Los totales del dashboard siguen usando misGastos() sin compartido, para no duplicar montos. */
+   Acá sí mostramos el monto completo (no la mitad), porque es solo para verlos, no para sumar. */
 function misGastosParaLista(){
   if(currentUser === 'Conjunto') return todosGastos().filter(g=>g.seccion==='compartido');
   return todosGastos().filter(g=>(g.usuario===currentUser && g.seccion!=='compartido') || g.seccion==='compartido');
