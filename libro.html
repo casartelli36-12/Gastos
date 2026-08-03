@@ -441,15 +441,49 @@ function initApp(){
     if(!DB.gastos) DB.gastos = {};
     if(!DB.ingresos) DB.ingresos = {};
     seedIfEmpty();
+    migrarAgregados();
   } else {
     dbRef.once('value').then(snap=>{
       DB = snap.val() || { gastos:{}, ingresos:{} };
       if(!DB.gastos) DB.gastos = {};
       if(!DB.ingresos) DB.ingresos = {};
       seedIfEmpty();
+      migrarAgregados();
       dbRef.on('value', snap2=>{ DB = snap2.val() || {gastos:{},ingresos:{}}; if(!DB.gastos) DB.gastos={}; if(!DB.ingresos) DB.ingresos={}; afterDataLoad(); });
     });
   }
+}
+/* Los montos "agregado" (totales mensuales estimados/importados de planillas) pueden mejorarse
+   con el tiempo (por ejemplo cuando aparece la planilla real). Como seedIfEmpty solo corre la
+   primera vez que se abre la app en un dispositivo, esta migración corrige los "agregado"
+   viejos ya guardados cada vez que la versión de esos datos cambia — sin tocar nada que el
+   usuario haya cargado a mano. */
+const SEED_AGREGADO_VERSION = 3;
+function migrarAgregados(){
+  if(DB._seedAgregadoVersion === SEED_AGREGADO_VERSION) return;
+  Object.keys(DB.gastos).forEach(id=>{ if(DB.gastos[id].agregado) delete DB.gastos[id]; });
+  Object.keys(DB.ingresos).forEach(id=>{ if(DB.ingresos[id].agregado) delete DB.ingresos[id]; });
+  SEED.forEach((e,i)=>{
+    if(!e.agregado) return;
+    const id = 'seedmig_' + SEED_AGREGADO_VERSION + '_' + i;
+    DB.gastos[id] = {
+      seccion: e.seccion, fecha: e.fecha, monto: e.monto, desc: e.desc,
+      categoria: e.categoria, usuario: e.usuario, revisarVicky: e.revisar_vicky || false,
+      agregado: true
+    };
+  });
+  SEED_INGRESOS.forEach((e,i)=>{
+    if(!e.agregado) return;
+    const id = 'ingseedmig_' + SEED_AGREGADO_VERSION + '_' + i;
+    DB.ingresos[id] = {
+      fecha: e.fecha, monto: e.monto, desc: e.desc,
+      categoria: e.categoria, usuario: e.usuario, revisarVicky: e.revisar_vicky || false,
+      agregado: true
+    };
+  });
+  DB._seedAgregadoVersion = SEED_AGREGADO_VERSION;
+  persist();
+  afterDataLoad();
 }
 function seedIfEmpty(){
   DB.gastos = DB.gastos || {};
