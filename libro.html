@@ -294,6 +294,8 @@
     </div>
     <div class="filters" id="mv-filtros-gasto">
       <select id="mv-mes" onchange="renderMovimientos()"></select>
+      <select id="mv-cat" onchange="renderMovimientos()"></select>
+      <button type="button" class="cat-toggle" style="flex:none; padding:9px 4px;" onclick="abrirGestionCategorias()">⚙️ Categorías</button>
     </div>
     <div class="filters hidden" id="mv-filtros-ingreso">
       <select id="mv-mes-ing" onchange="renderMovimientos()"></select>
@@ -394,8 +396,11 @@ if(!LOCAL_MODE){
   dbRef = firebase.database().ref("libroGastos");
 }
 
-/* ---------- Categorías por sección (grupo -> subcategorías) ---------- */
-const CATEGORIAS = {
+/* ---------- Categorías por sección (grupo -> subcategorías) ----------
+   CATEGORIAS_DEFAULT es la semilla inicial. La lista "viva" que se edita y persiste
+   en Firebase es DB.categorias; la variable CATEGORIAS siempre apunta a DB.categorias
+   una vez que los datos cargaron (ver syncCategorias()). */
+const CATEGORIAS_DEFAULT = {
   personal: [
     {nombre:"Auto", subs:["Nafta","Peajes","Estacionamiento","Seguro auto","Service"]},
     {nombre:"Comida", subs:["Super/Chino","Comida día a día","Salidas a comer","Delivery","Comidas con amigos en casa","Kiosco","Carnicería","Verdulería"]},
@@ -406,9 +411,10 @@ const CATEGORIAS = {
     {nombre:"Vivienda", subs:[]},
     {nombre:"Otros", subs:["Varios propio","Boludeces","Ropa","Viajes","Regalos","Alcohol","Impuestos kine","Otros"]}
   ],
-  compartido: [], // se asigna = personal más abajo, para no duplicar categorías
+  compartido: [], // no se usa directamente: la lista compartida real se siembra desde "personal" en syncCategorias()
   ingreso: ["Sueldo QAC","Sueldo FAA","Kinesio particular","Otros","Devoluciones"] // sin subcategorías
 };
+let CATEGORIAS = CATEGORIAS_DEFAULT;
 const SECCION_LABEL = {personal:"Personal", compartido:"Con Vicky"};
 /* Mapeo de nombres de categoría "viejos" (planos) a {grupo, sub} para migrar datos ya cargados */
 const MIGRACION_CATEGORIAS = {
@@ -630,7 +636,46 @@ function persist(){
   if(LOCAL_MODE){ localStorage.setItem('libroGastos', JSON.stringify(DB)); }
   else { dbRef.set(DB); }
 }
+/* Las categorías/subcategorías viven en DB.categorias y se persisten en Firebase.
+   Personal e ingresos son propias de cada usuario (Lucas y Vicky tienen listas separadas);
+   "compartido" (gastos en conjunto) es una única lista común a ambos. */
+function syncCategorias(){
+  const usuarioClave = (currentUser === 'Lucas' || currentUser === 'Vicky') ? currentUser : 'Lucas';
+  let cambio = false;
+  if(!DB.categorias){
+    DB.categorias = { compartido: JSON.parse(JSON.stringify(CATEGORIAS_DEFAULT.personal)), porUsuario: {} };
+    cambio = true;
+  }
+  // Migración desde el esquema viejo (una sola lista personal/ingreso compartida por todos)
+  if(DB.categorias.personal && !DB.categorias.porUsuario){
+    const personalViejo = DB.categorias.personal;
+    const ingresoViejo = DB.categorias.ingreso || CATEGORIAS_DEFAULT.ingreso;
+    DB.categorias = {
+      compartido: DB.categorias.compartido && DB.categorias.compartido.length ? DB.categorias.compartido : personalViejo,
+      porUsuario: {
+        Lucas: { personal: JSON.parse(JSON.stringify(personalViejo)), ingreso: JSON.parse(JSON.stringify(ingresoViejo)) },
+        Vicky: { personal: JSON.parse(JSON.stringify(personalViejo)), ingreso: JSON.parse(JSON.stringify(ingresoViejo)) }
+      }
+    };
+    cambio = true;
+  }
+  if(!DB.categorias.porUsuario) DB.categorias.porUsuario = {};
+  if(!DB.categorias.porUsuario[usuarioClave]){
+    DB.categorias.porUsuario[usuarioClave] = {
+      personal: JSON.parse(JSON.stringify(CATEGORIAS_DEFAULT.personal)),
+      ingreso: JSON.parse(JSON.stringify(CATEGORIAS_DEFAULT.ingreso))
+    };
+    cambio = true;
+  }
+  if(cambio) persist();
+  CATEGORIAS = {
+    personal: DB.categorias.porUsuario[usuarioClave].personal,
+    ingreso: DB.categorias.porUsuario[usuarioClave].ingreso,
+    compartido: DB.categorias.compartido
+  };
+}
 function afterDataLoad(){
+  syncCategorias();
   renderInicio();
   renderMovimientos();
   renderBalance();
@@ -831,7 +876,6 @@ let subcategoriaSeleccionada = null;
 let mostrandoTodas = false;
 let esCompartido = false;
 const TOP_N_CHIPS = 8;
-CATEGORIAS.compartido = CATEGORIAS.personal; // gastos en conjunto usan las mismas categorías que los personales
 
 function claveActual(){ return tipoActual === 'ingreso' ? 'ingreso' : seccionActual; }
 function esClaveConGrupos(clave){ return clave !== 'ingreso'; }
@@ -922,6 +966,7 @@ function nuevaCategoria(){
   if(!nueva || !nueva.trim()) return;
   if(esClaveConGrupos(clave)) CATEGORIAS[clave].push({nombre:nueva.trim(), subs:[]});
   else CATEGORIAS[clave].push(nueva.trim());
+  persist();
   categoriaSeleccionada = nueva.trim();
   subcategoriaSeleccionada = null;
   renderCatChips();
@@ -933,31 +978,55 @@ function nuevaSubcategoria(){
   const nueva = prompt('Nombre de la nueva subcategoría de "'+grupo.nombre+'":');
   if(!nueva || !nueva.trim()) return;
   grupo.subs.push(nueva.trim());
+  persist();
   subcategoriaSeleccionada = nueva.trim();
   renderCatChips();
   document.getElementById('f-monto').focus();
 }
 function abrirGestionCategorias(){
-  renderGestionCategorias('personal');
+  renderGestionCategorias(currentUser === 'Conjunto' ? 'compartido' : 'personal');
 }
 function renderGestionCategorias(clave){
   const root = document.getElementById('modal-root');
+  const esConjunto = currentUser === 'Conjunto';
   root.innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal">
         <h3>Editar categorías</h3>
+        <div class="seg" id="seg-gestion-clave" style="margin-bottom:14px;">
+          ${esConjunto ? '' : '<button data-val="personal" onclick="renderGestionCategorias(\'personal\')">Mis gastos</button>'}
+          <button data-val="compartido" onclick="renderGestionCategorias('compartido')">Compartidos</button>
+          ${esConjunto ? '' : '<button data-val="ingreso" onclick="renderGestionCategorias(\'ingreso\')">Mis ingresos</button>'}
+        </div>
+        <p style="color:var(--text-dim); font-size:12px; margin:-8px 0 12px;">${clave==='compartido' ? 'Estas categorías las ven vos y ' + (currentUser==='Vicky'?'Lucas':(currentUser==='Lucas'?'Vicky':'ambos')) + '.' : 'Solo vos ves y usás estas categorías.'}</p>
         <div id="gestion-cat-list"></div>
         <button type="button" class="submit-btn" style="margin-top:10px;" onclick="nuevoGrupoCategoria('${clave}')">+ Nueva categoría</button>
         <div class="modal-actions" style="margin-top:10px;">
-          <button class="btn-save" onclick="cerrarModal(); renderCatChips();">Listo</button>
+          <button class="btn-save" onclick="cerrarModal(); renderCatChips(); renderMovimientos();">Listo</button>
         </div>
       </div>
     </div>`;
+  document.querySelectorAll('#seg-gestion-clave button').forEach(b=>b.classList.toggle('active', b.dataset.val===clave));
   renderListaGestionCategorias(clave);
 }
 function renderListaGestionCategorias(clave){
+  const cont = document.getElementById('gestion-cat-list');
+  if(!esClaveConGrupos(clave)){
+    const cats = CATEGORIAS[clave];
+    cont.innerHTML = cats.map((c,i)=>`
+      <div class="gestion-grupo">
+        <div class="gestion-grupo-head">
+          <b>${c}</b>
+          <span>
+            <button type="button" class="mini-btn" onclick="renombrarCategoriaFlat('${clave}',${i})">✏️</button>
+            <button type="button" class="mini-btn" onclick="borrarCategoriaFlat('${clave}',${i})">🗑</button>
+          </span>
+        </div>
+      </div>`).join('');
+    return;
+  }
   const grupos = CATEGORIAS[clave];
-  document.getElementById('gestion-cat-list').innerHTML = grupos.map((g,gi)=>`
+  cont.innerHTML = grupos.map((g,gi)=>`
     <div class="gestion-grupo">
       <div class="gestion-grupo-head">
         <b>${g.nombre}</b>
@@ -975,9 +1044,13 @@ function renderListaGestionCategorias(clave){
 function nuevoGrupoCategoria(clave){
   const nombre = prompt('Nombre de la nueva categoría:');
   if(!nombre || !nombre.trim()) return;
-  CATEGORIAS[clave].push({nombre:nombre.trim(), subs:[]});
+  if(esClaveConGrupos(clave)) CATEGORIAS[clave].push({nombre:nombre.trim(), subs:[]});
+  else CATEGORIAS[clave].push(nombre.trim());
+  persist();
   renderListaGestionCategorias(clave);
 }
+/* Los gastos "personal" pertenecen únicamente al usuario que editó la categoría; los
+   "compartido" son comunes a Lucas y Vicky, así que renombrar/borrar ahí afecta a ambos. */
 function renombrarGrupo(clave, idx){
   const g = CATEGORIAS[clave][idx];
   const nuevo = prompt('Nuevo nombre para "'+g.nombre+'":', g.nombre);
@@ -985,8 +1058,8 @@ function renombrarGrupo(clave, idx){
   const viejo = g.nombre;
   g.nombre = nuevo.trim();
   todosGastos().forEach(x=>{
-    const seccionCoincide = x.seccion === clave || (clave==='personal' && x.seccion==='compartido');
-    if(seccionCoincide && x.categoria === viejo) DB.gastos[x.id].categoria = g.nombre;
+    const coincide = clave==='compartido' ? x.seccion==='compartido' : (x.seccion==='personal' && x.usuario===currentUser);
+    if(coincide && x.categoria === viejo) DB.gastos[x.id].categoria = g.nombre;
   });
   persist();
   renderListaGestionCategorias(clave);
@@ -995,17 +1068,38 @@ function borrarGrupo(clave, idx){
   const g = CATEGORIAS[clave][idx];
   if(!confirm('¿Eliminar la categoría "'+g.nombre+'"? Los gastos ya cargados con esta categoría no se borran, solo dejan de aparecer como opción.')) return;
   CATEGORIAS[clave].splice(idx,1);
+  persist();
   renderListaGestionCategorias(clave);
 }
 function nuevaSubDeGrupo(clave, idx){
   const nombre = prompt('Nombre de la nueva subcategoría:');
   if(!nombre || !nombre.trim()) return;
   CATEGORIAS[clave][idx].subs.push(nombre.trim());
+  persist();
   renderListaGestionCategorias(clave);
 }
 function borrarSub(clave, gi, si){
   if(!confirm('¿Eliminar esta subcategoría?')) return;
   CATEGORIAS[clave][gi].subs.splice(si,1);
+  persist();
+  renderListaGestionCategorias(clave);
+}
+/* Ingresos: lista plana (sin subcategorías), siempre propia de cada usuario */
+function renombrarCategoriaFlat(clave, idx){
+  const viejo = CATEGORIAS[clave][idx];
+  const nuevo = prompt('Nuevo nombre para "'+viejo+'":', viejo);
+  if(!nuevo || !nuevo.trim()) return;
+  CATEGORIAS[clave][idx] = nuevo.trim();
+  todosIngresos().forEach(x=>{
+    if(x.usuario===currentUser && x.categoria===viejo) DB.ingresos[x.id].categoria = nuevo.trim();
+  });
+  persist();
+  renderListaGestionCategorias(clave);
+}
+function borrarCategoriaFlat(clave, idx){
+  if(!confirm('¿Eliminar esta categoría? Los ingresos ya cargados no se borran, solo dejan de aparecer como opción.')) return;
+  CATEGORIAS[clave].splice(idx,1);
+  persist();
   renderListaGestionCategorias(clave);
 }
 function prepCargarForm(){
@@ -1248,6 +1342,12 @@ function populateMesFilter(){
   sel.innerHTML = '<option value="">Todos los meses</option>' + meses.map(m=>`<option value="${m}">${mesLabel(m)}</option>`).join('');
   if(meses.includes(current)) sel.value = current;
 
+  const selCat = document.getElementById('mv-cat');
+  const categorias = [...new Set(gastos.map(g=>g.categoria))].sort((a,b)=>a.localeCompare(b));
+  const currentCat = selCat.value;
+  selCat.innerHTML = '<option value="">Todas las categorías</option>' + categorias.map(c=>`<option value="${c.replace(/"/g,'&quot;')}">${c}</option>`).join('');
+  if(categorias.includes(currentCat)) selCat.value = currentCat;
+
   const selIng = document.getElementById('mv-mes-ing');
   const mesesIng = [...new Set(misIngresos().map(g=>mesKey(g.fecha)))].sort().reverse();
   const currentIng = selIng.value;
@@ -1280,11 +1380,15 @@ function renderMovimientos(){
     return;
   }
   const mesFiltro = document.getElementById('mv-mes').value;
+  const catFiltro = document.getElementById('mv-cat').value;
   let gastos = misGastos();
   if(mesFiltro) gastos = gastos.filter(g=>mesKey(g.fecha)===mesFiltro);
+  if(catFiltro) gastos = gastos.filter(g=>g.categoria===catFiltro);
   gastos.sort((a,b)=> b.fecha.localeCompare(a.fecha));
   if(gastos.length === 0){ list.innerHTML = '<div class="empty-state">No hay movimientos para este filtro.</div>'; return; }
-  list.innerHTML = gastos.map(g=>{
+  const total = gastos.reduce((s,g)=>s+g.monto,0);
+  const totalHTML = (mesFiltro || catFiltro) ? `<div class="empty-state" style="padding:0 0 14px; text-align:left; color:var(--text-dim); font-size:13px;">Total filtrado: <b style="color:var(--text);">${fmt(total)}</b> (${gastos.length} ${gastos.length===1?'movimiento':'movimientos'})</div>` : '';
+  list.innerHTML = totalHTML + gastos.map(g=>{
     const flag = g.revisarVicky ? '<span class="tag">revisar Vicky?</span>' : '';
     const agregado = g.agregado ? '<span class="tag">agregado</span>' : '';
     return `<div class="mov-item" onclick="abrirEdicion('${g.id}')">
@@ -1318,7 +1422,7 @@ function abrirEdicion(id){
   const g = DB.gastos[id];
   if(!g) return;
   const esCompartidoAhora = g.seccion === 'compartido';
-  window._editSeccionCat = 'personal';
+  window._editSeccionCat = esCompartidoAhora ? 'compartido' : 'personal';
   const subHTML = opcionesSubHTML(window._editSeccionCat, g.categoria, g.subcategoria);
   const root = document.getElementById('modal-root');
   root.innerHTML = `
@@ -1370,10 +1474,10 @@ function toggleEdicionCompartido(id){
   const g = DB.gastos[id];
   const marcado = document.getElementById('e-compartido').checked;
   document.getElementById('e-split-box').classList.toggle('hidden', !marcado);
-  window._editSeccionCat = 'personal'; // compartido usa las mismas categorías que personal
+  window._editSeccionCat = marcado ? 'compartido' : 'personal';
   const sel = document.getElementById('e-categoria');
   const actual = sel.value;
-  sel.innerHTML = opcionesCategoriaHTML('personal', actual);
+  sel.innerHTML = opcionesCategoriaHTML(window._editSeccionCat, actual);
   onCambioCategoriaEdicion();
 }
 function toggleEdicionCustomSplit(){
