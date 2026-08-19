@@ -673,6 +673,14 @@ function syncCategorias(){
     ingreso: DB.categorias.porUsuario[usuarioClave].ingreso,
     compartido: DB.categorias.compartido
   };
+  // Firebase no persiste arrays vacíos: una categoría sin subcategorías (ej. "Vivienda", subs:[])
+  // pierde el campo "subs" al volver de la base. Sin este arreglo, cualquier código que haga
+  // g.subs.map(...) explota en silencio y rompe la lista entera de categorías.
+  normalizarSubs(CATEGORIAS.personal);
+  normalizarSubs(CATEGORIAS.compartido);
+}
+function normalizarSubs(grupos){
+  (grupos||[]).forEach(g=>{ if(!Array.isArray(g.subs)) g.subs=[]; });
 }
 function afterDataLoad(){
   syncCategorias();
@@ -977,6 +985,7 @@ function nuevaSubcategoria(){
   if(!grupo) return;
   const nueva = prompt('Nombre de la nueva subcategoría de "'+grupo.nombre+'":');
   if(!nueva || !nueva.trim()) return;
+  if(!Array.isArray(grupo.subs)) grupo.subs=[];
   grupo.subs.push(nueva.trim());
   persist();
   subcategoriaSeleccionada = nueva.trim();
@@ -1016,7 +1025,7 @@ function renderListaGestionCategorias(clave){
     cont.innerHTML = cats.map((c,i)=>`
       <div class="gestion-grupo">
         <div class="gestion-grupo-head">
-          <b>${c}</b>
+          <b>${i+1}. ${c}</b>
           <span>
             <button type="button" class="mini-btn" onclick="renombrarCategoriaFlat('${clave}',${i})">✏️</button>
             <button type="button" class="mini-btn" onclick="borrarCategoriaFlat('${clave}',${i})">🗑</button>
@@ -1029,14 +1038,14 @@ function renderListaGestionCategorias(clave){
   cont.innerHTML = grupos.map((g,gi)=>`
     <div class="gestion-grupo">
       <div class="gestion-grupo-head">
-        <b>${g.nombre}</b>
+        <b>${gi+1}. ${g.nombre}</b>
         <span>
           <button type="button" class="mini-btn" onclick="renombrarGrupo('${clave}',${gi})">✏️</button>
           <button type="button" class="mini-btn" onclick="borrarGrupo('${clave}',${gi})">🗑</button>
         </span>
       </div>
       <div class="chip-grid" style="margin-top:6px;">
-        ${g.subs.map((s,si)=>`<span class="chip">${s} <a onclick="borrarSub('${clave}',${gi},${si})" style="color:var(--red);cursor:pointer;">✕</a></span>`).join('')}
+        ${(g.subs||[]).map((s,si)=>`<span class="chip">${s} <a onclick="moverSub('${clave}',${gi},${si})" style="color:var(--navy);cursor:pointer;" title="Mover a otra categoría">⇄</a> <a onclick="borrarSub('${clave}',${gi},${si})" style="color:var(--red);cursor:pointer;" title="Eliminar">✕</a></span>`).join('')}
         <button type="button" class="chip chip-new" onclick="nuevaSubDeGrupo('${clave}',${gi})">+ sub</button>
       </div>
     </div>`).join('');
@@ -1074,7 +1083,29 @@ function borrarGrupo(clave, idx){
 function nuevaSubDeGrupo(clave, idx){
   const nombre = prompt('Nombre de la nueva subcategoría:');
   if(!nombre || !nombre.trim()) return;
+  if(!Array.isArray(CATEGORIAS[clave][idx].subs)) CATEGORIAS[clave][idx].subs=[];
   CATEGORIAS[clave][idx].subs.push(nombre.trim());
+  persist();
+  renderListaGestionCategorias(clave);
+}
+// Mueve una subcategoría de su categoría actual a otra dentro de la misma clave (personal/compartido).
+// Los gastos ya cargados con esa subcategoría no se tocan (siguen apuntando al mismo nombre de sub,
+// que ahora simplemente vive bajo otra categoría en la lista de opciones).
+function moverSub(clave, gi, si){
+  const grupos = CATEGORIAS[clave];
+  const sub = (grupos[gi].subs||[])[si];
+  if(sub===undefined) return;
+  const destinos = grupos.map((g,idx)=>idx).filter(idx=>idx!==gi);
+  if(!destinos.length){ alert('No hay otra categoría a la que mover esta subcategoría.'); return; }
+  const lista = destinos.map((idx,n)=>(n+1)+'. '+grupos[idx].nombre).join('\n');
+  const resp = prompt('Mover "'+sub+'" a qué categoría?\n\n'+lista+'\n\nEscribí el número:');
+  if(!resp || !resp.trim()) return;
+  const n = parseInt(resp.trim());
+  if(!n || n<1 || n>destinos.length){ alert('Número inválido.'); return; }
+  const destIdx = destinos[n-1];
+  grupos[gi].subs.splice(si,1);
+  if(!Array.isArray(grupos[destIdx].subs)) grupos[destIdx].subs=[];
+  grupos[destIdx].subs.push(sub);
   persist();
   renderListaGestionCategorias(clave);
 }
@@ -1409,7 +1440,7 @@ function opcionesCategoriaHTML(seccionCat, selVal){
 function opcionesSubHTML(seccionCat, categoriaVal, selVal){
   if(!esClaveConGrupos(seccionCat)) return '';
   const grupo = CATEGORIAS[seccionCat].find(g=>g.nombre===categoriaVal);
-  if(!grupo || !grupo.subs.length) return '';
+  if(!grupo || !(grupo.subs||[]).length) return '';
   return '<option value="">—</option>' + grupo.subs.map(s=>`<option ${s===selVal?'selected':''}>${s}</option>`).join('');
 }
 function onCambioCategoriaEdicion(){
