@@ -170,6 +170,28 @@
   table.cmp tbody tr:hover{background:rgba(255,255,255,0.02);}
   table.cmp td.mono{font-family:'Space Mono',monospace;}
   table.cmp td.hi{color:#E8B4A5; font-weight:700;}
+  table.cmp td.cmp-cel{cursor:pointer; -webkit-tap-highlight-color:transparent;}
+  table.cmp td.cmp-cel:active{background:var(--ink3);}
+  .neto-bars{display:flex; align-items:flex-end; gap:6px; height:130px; margin:4px 0 6px;}
+  .neto-col{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; min-width:0;}
+  .neto-par{display:flex; align-items:flex-end; gap:3px; width:100%; height:100%; justify-content:center;}
+  .neto-bar{width:42%; max-width:22px; border-radius:4px 4px 0 0; min-height:2px;}
+  .neto-bar.ing{background:#7BB38A;}
+  .neto-bar.gas{background:#D98C78;}
+  .neto-lbl{font-size:10px; color:var(--text-dim); margin-top:5px; text-transform:uppercase;}
+  .neto-leg{display:flex; gap:14px; font-size:11px; color:var(--text-dim); margin-bottom:12px;}
+  .neto-leg i{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px;}
+  table.cmp td.pos{color:#8FCB9F;}
+  table.cmp td.neg{color:#E8B4A5;}
+  .det-row{display:flex; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--ink3); font-size:13px;}
+  .det-row .meta{font-size:11px; color:var(--text-dim); margin-top:2px;}
+  .det-row .amt{font-family:'Space Mono',monospace; font-weight:700; white-space:nowrap;}
+  table.cmp tr.cmp-off td{opacity:.35;}
+  table.cmp tr.cmp-off td.cat-col .cmp-name{text-decoration:line-through;}
+  table.cmp td.cat-col{cursor:pointer; -webkit-tap-highlight-color:transparent;}
+  table.cmp td.cat-col .cmp-chk{display:inline-block; width:14px; margin-right:6px; color:var(--gold); font-size:12px;}
+  .cmp-aviso{display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--ink3); border:1px solid var(--gold-dim); border-radius:10px; padding:8px 12px; margin-bottom:10px; font-size:12px; color:var(--text-dim);}
+  .cmp-aviso button{background:none; border:1px solid var(--gold-dim); color:var(--gold); border-radius:8px; padding:5px 10px; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap;}
   table.cmp tr.total-row td{border-top:2px solid var(--gold-dim); border-bottom:none; font-weight:700; color:var(--gold);}
 
   /* ---- Color por sección ---- */
@@ -345,8 +367,10 @@
     <div class="seg" id="seg-comparar-tipo" style="margin-bottom:10px;">
       <button data-val="gasto" onclick="setCompararTipo('gasto')" class="active">Gastos</button>
       <button data-val="ingreso" onclick="setCompararTipo('ingreso')">Ingresos</button>
+      <button data-val="neto" onclick="setCompararTipo('neto')">Neto</button>
     </div>
     <p style="color:var(--text-dim); font-size:12.5px; margin:-4px 0 14px;" id="comparar-sub">Últimos 6 meses. En rojo: categorías más de 50% arriba de su promedio.</p>
+    <div class="cmp-aviso hidden" id="cmp-aviso"></div>
     <div class="card">
       <div class="tabla-wrap" id="cmp-tabla"></div>
     </div>
@@ -870,6 +894,7 @@ function configurarNavPorPerfil(){
   if(esSuper){ showView('inventario'); return; }
   const esConjunto = currentUser === 'Conjunto';
   document.getElementById('seg-comparar-tipo').querySelector('[data-val="ingreso"]').classList.toggle('hidden', esConjunto);
+  document.getElementById('seg-comparar-tipo').querySelector('[data-val="neto"]').classList.toggle('hidden', esConjunto);
   if(document.getElementById('view-comparar') && !document.getElementById('view-comparar').classList.contains('hidden')){
     if(esConjunto) compararTipo = 'gasto';
     setCompararTipo(compararTipo);
@@ -1678,22 +1703,111 @@ function renderAnual(){
 
 /* ---------- Comparar (tabla tipo planilla) ---------- */
 let compararTipo = 'gasto';
+// Categorías ocultas momentáneamente en la comparación (solo en memoria, una lista por tipo)
+const cmpExcluidas = { gasto: new Set(), ingreso: new Set() };
+function toggleCmpCat(el){
+  const cat = decodeURIComponent(el.dataset.cat);
+  const s = cmpExcluidas[compararTipo];
+  if(s.has(cat)) s.delete(cat); else s.add(cat);
+  renderComparar();
+}
+function resetCmpCats(){ cmpExcluidas[compararTipo].clear(); renderComparar(); }
 function setCompararTipo(tipo){
   compararTipo = tipo;
   document.querySelectorAll('#seg-comparar-tipo button').forEach(b=>b.classList.toggle('active', b.dataset.val===tipo));
   renderComparar();
 }
+function escH(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function resetCmpTodas(){ cmpExcluidas.gasto.clear(); cmpExcluidas.ingreso.clear(); renderComparar(); }
+
+/* Detalle de una celda: movimientos de una categoría en un mes */
+function verDetalleCmp(el){
+  const cat = decodeURIComponent(el.dataset.cat);
+  const mk = el.dataset.mes;
+  const esIngreso = compararTipo === 'ingreso';
+  const datos = (esIngreso ? misIngresos() : misGastos())
+    .filter(g=>g.categoria===cat && mesKey(g.fecha)===mk)
+    .sort((a,b)=> b.fecha.localeCompare(a.fecha));
+  if(!datos.length) return;
+  const total = datos.reduce((a,g)=>a+g.monto,0);
+  const filas = datos.map(g=>{
+    const mitad = !esIngreso && currentUser!=='Conjunto' && g.seccion==='compartido' && g.pagador==='Ambos';
+    const sub = g.subcategoria ? ' › '+escH(g.subcategoria) : '';
+    return `<div class="det-row"><div><div>${escH(g.desc||'(sin descripción)')}</div><div class="meta">${g.fecha}${sub}${mitad?' · tu mitad':''}</div></div><div class="amt">${fmt(g.monto)}</div></div>`;
+  }).join('');
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <h3>${escH(cat)} · ${mesLabel(mk)}</h3>
+        ${filas}
+        <div class="det-row" style="border-bottom:none; font-weight:700; color:var(--gold);"><span>Total (${datos.length})</span><span class="amt">${fmt(total)}</span></div>
+        <div class="modal-actions" style="margin-top:12px;"><button class="btn-save" onclick="cerrarModal()">Cerrar</button></div>
+      </div>
+    </div>`;
+}
+
+/* Vista Neto: ingresos vs gastos por mes (respeta las categorías sacadas en cada pestaña) */
+function renderNeto(){
+  const cont = document.getElementById('cmp-tabla');
+  const avisoEl = document.getElementById('cmp-aviso');
+  document.getElementById('comparar-sub').textContent = 'Ingresos vs gastos, últimos 6 meses. Respeta las categorías que saques en Gastos e Ingresos.';
+  const hoyKey = new Date().toISOString().slice(0,7);
+  const meses = [];
+  for(let i=5;i>=0;i--) meses.push(mesKeyOffset(hoyKey, -i));
+  const exG = cmpExcluidas.gasto, exI = cmpExcluidas.ingreso;
+  const ing = misIngresos().filter(g=>!exI.has(g.categoria));
+  const gas = misGastos().filter(g=>!exG.has(g.categoria));
+  const filas = meses.map(mk=>{
+    const i = ing.filter(g=>mesKey(g.fecha)===mk).reduce((a,g)=>a+g.monto,0);
+    const g = gas.filter(x=>mesKey(x.fecha)===mk).reduce((a,x)=>a+x.monto,0);
+    return { mk, i, g, neto:i-g, pct: i>0 ? (i-g)/i*100 : null };
+  });
+  const nExc = exG.size + exI.size;
+  if(nExc){
+    avisoEl.innerHTML = `<span>Sin ${nExc} ${nExc===1?'categoría':'categorías'} en el cálculo</span><button type="button" onclick="resetCmpTodas()">Mostrar todas</button>`;
+    avisoEl.classList.remove('hidden');
+  } else avisoEl.classList.add('hidden');
+  if(!filas.some(f=>f.i>0 || f.g>0)){ cont.innerHTML = '<div class="empty-state">Todavía no hay suficientes datos.</div>'; return; }
+  const max = Math.max(...filas.map(f=>Math.max(f.i,f.g)), 1);
+  const barras = filas.map(f=>`
+    <div class="neto-col">
+      <div class="neto-par">
+        <div class="neto-bar ing" style="height:${f.i/max*100}%"></div>
+        <div class="neto-bar gas" style="height:${f.g/max*100}%"></div>
+      </div>
+      <div class="neto-lbl">${mesLabel(f.mk)}</div>
+    </div>`).join('');
+  const head = `<tr><th class="cat-col"></th>${filas.map(f=>`<th>${mesLabel(f.mk)}</th>`).join('')}<th>Prom.</th></tr>`;
+  const conDatos = filas.filter(f=>f.i>0 || f.g>0);
+  const prom = k => conDatos.length ? conDatos.reduce((a,f)=>a+f[k],0)/conDatos.length : 0;
+  const pctVals = filas.filter(f=>f.pct!==null);
+  const promPct = pctVals.length ? pctVals.reduce((a,f)=>a+f.pct,0)/pctVals.length : null;
+  const fila = (nombre, key, clase) => `<tr${clase==='total'?' class="total-row"':''}><td class="cat-col" style="cursor:default;">${nombre}</td>${filas.map(f=>{
+    const v=f[key];
+    const c = key==='neto' ? (v>0?' pos':(v<0?' neg':'')) : '';
+    return `<td class="mono${c}">${(f.i>0||f.g>0)?fmt(v):'—'}</td>`;
+  }).join('')}<td class="mono${key==='neto'?(prom(key)>=0?' pos':' neg'):''}">${fmt(prom(key))}</td></tr>`;
+  const filaPct = `<tr><td class="cat-col" style="cursor:default;">% ahorrado</td>${filas.map(f=>`<td class="mono${f.pct!==null?(f.pct>=0?' pos':' neg'):''}">${f.pct!==null?Math.round(f.pct)+'%':'—'}</td>`).join('')}<td class="mono${promPct!==null?(promPct>=0?' pos':' neg'):''}">${promPct!==null?Math.round(promPct)+'%':'—'}</td></tr>`;
+  cont.innerHTML = `
+    <div class="neto-bars">${barras}</div>
+    <div class="neto-leg"><span><i style="background:#7BB38A"></i>Ingresos</span><span><i style="background:#D98C78"></i>Gastos</span></div>
+    <table class="cmp"><thead>${head}</thead><tbody>
+      ${fila('Ingresos','i')}${fila('Gastos','g')}${fila('Neto','neto','total')}${filaPct}
+    </tbody></table>`;
+}
+
 function renderComparar(){
+  if(compararTipo === 'neto'){ renderNeto(); return; }
   const esIngreso = compararTipo === 'ingreso';
   const datos = esIngreso ? misIngresos() : misGastos();
   const esConjunto = currentUser === 'Conjunto';
   const subEl = document.getElementById('comparar-sub');
   if(esIngreso){
-    subEl.textContent = 'Tus ingresos, últimos 6 meses. En rojo: categorías más de 50% arriba de su promedio.';
+    subEl.textContent = 'Tus ingresos, últimos 6 meses. En rojo: categorías más de 50% arriba de su promedio. Tocá una categoría para sacarla del total, o un monto para ver el detalle.';
   } else {
     subEl.textContent = esConjunto
-      ? 'Gastos en conjunto, últimos 6 meses. En rojo: categorías más de 50% arriba de su promedio.'
-      : 'Tus gastos personales, últimos 6 meses. En rojo: categorías más de 50% arriba de su promedio.';
+      ? 'Gastos en conjunto, últimos 6 meses. En rojo: categorías más de 50% arriba de su promedio. Tocá una categoría para sacarla del total, o un monto para ver el detalle.'
+      : 'Tus gastos personales, últimos 6 meses. En rojo: categorías más de 50% arriba de su promedio. Tocá una categoría para sacarla del total, o un monto para ver el detalle.';
   }
   const hoyKey = new Date().toISOString().slice(0,7);
   const meses = [];
@@ -1706,10 +1820,20 @@ function renderComparar(){
     return { cat, valores, totalFila };
   }).filter(f=>f.totalFila > 0).sort((a,b)=>b.totalFila - a.totalFila);
 
-  const totalesPorMes = meses.map((mk,i)=> filas.reduce((a,f)=>a+f.valores[i],0));
+  const excl = cmpExcluidas[compararTipo];
+  // Si una categoría excluida ya no existe en los datos, la sacamos del set
+  [...excl].forEach(c=>{ if(!filas.some(f=>f.cat===c)) excl.delete(c); });
+  const totalesPorMes = meses.map((mk,i)=> filas.filter(f=>!excl.has(f.cat)).reduce((a,f)=>a+f.valores[i],0));
+  const avisoEl = document.getElementById('cmp-aviso');
+  if(excl.size){
+    avisoEl.innerHTML = `<span>Sin ${excl.size} ${excl.size===1?'categoría':'categorías'} en el total</span><button type="button" onclick="resetCmpCats()">Mostrar todas</button>`;
+    avisoEl.classList.remove('hidden');
+  } else {
+    avisoEl.classList.add('hidden');
+  }
 
   const cont = document.getElementById('cmp-tabla');
-  if(esIngreso && currentUser === 'Conjunto'){ cont.innerHTML = '<div class="empty-state">Los ingresos son individuales, elegí tu perfil para verlos.</div>'; return; }
+  if(esIngreso && currentUser === 'Conjunto'){ document.getElementById('cmp-aviso').classList.add('hidden'); cont.innerHTML = '<div class="empty-state">Los ingresos son individuales, elegí tu perfil para verlos.</div>'; return; }
   if(!filas.length){ cont.innerHTML = '<div class="empty-state">Todavía no hay suficientes datos.</div>'; return; }
 
   const head = `<tr><th class="cat-col">Categoría</th>${meses.map(mk=>`<th>${mesLabel(mk)}</th>`).join('')}</tr>`;
@@ -1718,11 +1842,14 @@ function renderComparar(){
       const otros = f.valores.filter((_,j)=>j!==i);
       const promOtros = otros.reduce((a,b)=>a+b,0) / (otros.filter(o=>o>0).length || otros.length || 1);
       const esAlto = promOtros>0 && v > promOtros*1.5;
-      return `<td class="mono${esAlto?' hi':''}">${v>0?fmt(v):'—'}</td>`;
+      return v>0
+        ? `<td class="mono cmp-cel${esAlto?' hi':''}" data-cat="${encodeURIComponent(f.cat)}" data-mes="${meses[i]}" onclick="verDetalleCmp(this)">${fmt(v)}</td>`
+        : `<td class="mono">—</td>`;
     }).join('');
-    return `<tr><td class="cat-col">${f.cat}</td>${celdas}</tr>`;
+    const off = excl.has(f.cat);
+    return `<tr class="${off?'cmp-off':''}"><td class="cat-col" data-cat="${encodeURIComponent(f.cat)}" onclick="toggleCmpCat(this)"><span class="cmp-chk">${off?'○':'●'}</span><span class="cmp-name">${f.cat}</span></td>${celdas}</tr>`;
   }).join('');
-  const totalRow = `<tr class="total-row"><td class="cat-col">Total</td>${totalesPorMes.map(t=>`<td class="mono">${fmt(t)}</td>`).join('')}</tr>`;
+  const totalRow = `<tr class="total-row"><td class="cat-col" style="cursor:default;">${excl.size?'Total (filtrado)':'Total'}</td>${totalesPorMes.map(t=>`<td class="mono">${fmt(t)}</td>`).join('')}</tr>`;
 
   cont.innerHTML = `<table class="cmp"><thead>${head}</thead><tbody>${body}${totalRow}</tbody></table>`;
 }
