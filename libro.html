@@ -386,6 +386,11 @@
     <div id="inv-cont"></div>
     <button type="button" class="submit-btn" style="margin-top:6px;" onclick="agregarItemInventario()">+ Agregar producto</button>
   </div>
+
+  <!-- VIAJES -->
+  <div class="view hidden" id="view-viajes">
+    <div id="viajes-cont"></div>
+  </div>
 </div>
 
 <nav id="bottom-nav" class="hidden">
@@ -393,6 +398,7 @@
   <button data-view="cargar" data-perfiles="Lucas,Vicky" onclick="showView('cargar')">➕<span>Cargar</span></button>
   <button data-view="movimientos" onclick="showView('movimientos')">📋<span>Movimientos</span></button>
   <button data-view="inventario" onclick="showView('inventario')">🛒<span>Súper</span></button>
+  <button data-view="viajes" data-perfiles="Lucas,Vicky,Conjunto" onclick="showView('viajes')">✈️<span>Viajes</span></button>
   <button data-view="balance" data-perfiles="Conjunto" onclick="showView('balance')">⚖️<span>Balance</span></button>
   <button data-view="anual" onclick="showView('anual')">📅<span>Anual</span></button>
   <button data-view="comparar" onclick="showView('comparar')">📊<span>Comparar</span></button>
@@ -711,12 +717,230 @@ function normalizarSubs(grupos){
   (grupos||[]).forEach(g=>{ if(!Array.isArray(g.subs)) g.subs=[]; });
 }
 function afterDataLoad(){
+  if(!DB.viajes) DB.viajes = {};
+  if(!DB.gastosViaje) DB.gastosViaje = {};
   syncCategorias();
   renderInicio();
   renderMovimientos();
   renderBalance();
   renderAnual();
   renderInventario();
+  renderViajes();
+}
+
+/* ---------- Viajes ----------
+   Control aparte: los gastos de viaje viven en DB.viajes / DB.gastosViaje y NUNCA en DB.gastos,
+   por eso no suman a Inicio, Movimientos, Balance, Anual ni Comparar. */
+const CATEGORIAS_VIAJE = ["Alojamiento","Transporte","Comida","Actividades","Compras","Otros"];
+let viajeAbierto = null;
+
+function viajesLista(){ return Object.entries(DB.viajes||{}).map(([id,v])=>({id,...v})); }
+function gastosDeViaje(viajeId){
+  return Object.entries(DB.gastosViaje||{}).map(([id,g])=>({id,...g})).filter(g=>g.viajeId===viajeId);
+}
+function fmtV(n, mon){ return (mon||'$') + ' ' + (Math.round((n||0)*100)/100).toLocaleString('es-AR',{maximumFractionDigits:2}); }
+function fechaCortaV(f){ return f ? f.slice(8,10)+'/'+f.slice(5,7)+'/'+f.slice(2,4) : ''; }
+function hoyLocalV(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function monedaDe(g, v){ return (g && g.moneda) || (v && v.moneda) || '$'; }
+/* Totales SEPARADOS por moneda: nunca se convierten ni se mezclan. */
+function resumenViaje(viajeId){
+  const v = (DB.viajes||{})[viajeId] || {};
+  const r = {porMoneda:{}, n:0};
+  gastosDeViaje(viajeId).forEach(g=>{
+    const mon = monedaDe(g, v);
+    const o = r.porMoneda[mon] || (r.porMoneda[mon] = {total:0, Lucas:0, Vicky:0, n:0});
+    const m = g.monto||0;
+    o.total += m; o.n++; r.n++;
+    if(g.pagador==='Lucas' || g.pagador==='Vicky') o[g.pagador] += m;
+  });
+  r.monedas = Object.keys(r.porMoneda).sort((a,b)=> r.porMoneda[b].n - r.porMoneda[a].n);
+  return r;
+}
+function saldoViajeTexto(o, mon){
+  if(!o.total) return '';
+  const dif = (o.Lucas - o.Vicky) / 2; // todo dividido 50/50
+  if(Math.abs(dif) < 0.005) return 'Están a mano ✔';
+  return (dif>0 ? 'Vicky le debe a Lucas ' : 'Lucas le debe a Vicky ') + fmtV(Math.abs(dif), mon);
+}
+function rangoFechasViaje(v){
+  if(v.desde && v.hasta) return fechaCortaV(v.desde)+' → '+fechaCortaV(v.hasta);
+  if(v.desde) return 'Desde '+fechaCortaV(v.desde);
+  return '';
+}
+function abrirViaje(id){ viajeAbierto = id; renderViajes(); window.scrollTo(0,0); }
+function cerrarViaje(){ viajeAbierto = null; renderViajes(); window.scrollTo(0,0); }
+
+function renderViajes(){
+  const cont = document.getElementById('viajes-cont');
+  if(!cont) return;
+  if(viajeAbierto && DB.viajes && DB.viajes[viajeAbierto]){ renderDetalleViaje(cont); return; }
+  viajeAbierto = null;
+  const viajes = viajesLista().sort((a,b)=> (b.desde||'').localeCompare(a.desde||'') || (b.creado||0)-(a.creado||0));
+  let html = '<h2>Viajes</h2><p style="color:var(--text-dim); font-size:12.5px; margin:-8px 0 14px;">Control aparte: lo que cargues acá no suma a tus gastos.</p>';
+  if(viajes.length===0){
+    html += '<div class="empty-state">Todavía no hay viajes. Creá el primero 👇</div>';
+  } else {
+    html += viajes.map(v=>{
+      const r = resumenViaje(v.id);
+      const rango = rangoFechasViaje(v);
+      return `
+      <div class="card" style="cursor:pointer;" onclick="abrirViaje('${v.id}')">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
+          <div style="font-size:16px; font-weight:700; min-width:0;">${escH(v.nombre)}</div>
+          <div class="mono" style="font-weight:700; color:var(--gold); text-align:right;">${r.monedas.length ? r.monedas.map(m=>`<div style="white-space:nowrap;">${fmtV(r.porMoneda[m].total, m)}</div>`).join('') : '—'}</div>
+        </div>
+        <div style="font-size:12px; color:var(--text-dim); margin-top:4px;">${rango ? rango+' · ' : ''}${r.n} gasto${r.n===1?'':'s'}</div>
+      </div>`;
+    }).join('');
+  }
+  html += '<button type="button" class="submit-btn" onclick="modalViaje()">+ Nuevo viaje</button>';
+  cont.innerHTML = html;
+}
+
+function renderDetalleViaje(cont){
+  const v = DB.viajes[viajeAbierto];
+  const r = resumenViaje(viajeAbierto);
+  const gastos = gastosDeViaje(viajeAbierto).sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||'') || (b.creado||0)-(a.creado||0));
+  const rango = rangoFechasViaje(v);
+  const totales = r.monedas.length===0 ? '' : r.monedas.map(mon=>{
+    const o = r.porMoneda[mon];
+    const saldo = saldoViajeTexto(o, mon);
+    return `
+    <div class="card">
+      <div class="card-label">Total en ${escH(mon)}</div>
+      <div class="mono" style="font-size:26px; font-weight:700; color:var(--gold);">${fmtV(o.total, mon)}</div>
+      <div style="display:flex; gap:10px; margin-top:12px;">
+        <div style="flex:1;"><div class="card-label">Puso Lucas</div><div class="mono" style="font-weight:700;">${fmtV(o.Lucas, mon)}</div></div>
+        <div style="flex:1;"><div class="card-label">Puso Vicky</div><div class="mono" style="font-weight:700;">${fmtV(o.Vicky, mon)}</div></div>
+      </div>
+      ${saldo ? `<div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--ink3); font-size:13px;">${saldo}<span style="color:var(--text-dim);"> (dividido 50/50)</span></div>` : ''}
+    </div>`;
+  }).join('');
+  cont.innerHTML = `
+    <button type="button" onclick="cerrarViaje()" style="background:none;border:none;color:var(--gold);font-size:13px;padding:0;margin-bottom:10px;">← Viajes</button>
+    <h2 style="margin-bottom:2px;">${escH(v.nombre)}</h2>
+    ${rango ? `<div style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px;">${rango}</div>` : '<div style="margin-bottom:14px;"></div>'}
+    ${totales}
+    <button type="button" class="submit-btn" style="margin:0 0 14px;" onclick="modalGastoViaje()">+ Agregar gasto</button>
+    <div class="card">
+      <div class="card-label" style="margin-bottom:4px;">Gastos</div>
+      ${gastos.length===0 ? '<div class="empty-state" style="padding:24px 10px;">Todavía no hay gastos en este viaje.</div>' : gastos.map(g=>`
+        <div class="mov-item" onclick="modalGastoViaje('${g.id}')" style="cursor:pointer;">
+          <div class="left">
+            <div class="desc">${escH(g.desc || g.categoria)}</div>
+            <div class="meta">${fechaCortaV(g.fecha)} · ${escH(g.categoria||'Otros')} · pagó ${escH(g.pagador||'?')}</div>
+          </div>
+          <div class="amt">${fmtV(g.monto, monedaDe(g, v))}</div>
+        </div>`).join('')}
+    </div>
+    <button type="button" onclick="modalViaje('${viajeAbierto}')" style="background:none;border:none;color:var(--text-dim);font-size:12px;text-decoration:underline;padding:0;">Editar o eliminar viaje</button>`;
+}
+
+function modalViaje(id){
+  const v = id ? DB.viajes[id] : {nombre:'', moneda:'$', desde:'', hasta:''};
+  if(!v) return;
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <h3>${id ? 'Editar viaje' : 'Nuevo viaje'}</h3>
+        <div class="field"><label>Nombre</label><input type="text" id="v-nombre" value="${escH(v.nombre)}" placeholder="Ej: Europa 2027"></div>
+        <div class="field"><label>Moneda principal (símbolo)</label><input type="text" id="v-moneda" value="${escH(v.moneda||'$')}" maxlength="6" placeholder="$, €, US$"></div>
+        <div class="field"><label>Desde (opcional)</label><input type="date" id="v-desde" value="${escH(v.desde||'')}"></div>
+        <div class="field"><label>Hasta (opcional)</label><input type="date" id="v-hasta" value="${escH(v.hasta||'')}"></div>
+        <div class="modal-actions">
+          ${id ? `<button class="btn-danger" onclick="borrarViaje('${id}')">Eliminar</button>` : '<button onclick="cerrarModal()">Cancelar</button>'}
+          <button class="btn-save" onclick="guardarViaje(${id ? `'${id}'` : 'null'})">Guardar</button>
+        </div>
+      </div>
+    </div>`;
+}
+function guardarViaje(id){
+  const nombre = document.getElementById('v-nombre').value.trim();
+  if(!nombre){ alert('Poné un nombre para el viaje.'); return; }
+  const datos = {
+    nombre,
+    moneda: document.getElementById('v-moneda').value.trim() || '$',
+    desde: document.getElementById('v-desde').value || '',
+    hasta: document.getElementById('v-hasta').value || ''
+  };
+  if(!DB.viajes) DB.viajes = {};
+  if(id){ DB.viajes[id] = {...DB.viajes[id], ...datos}; }
+  else { id = 'v' + Date.now(); DB.viajes[id] = {...datos, creado: Date.now()}; viajeAbierto = id; }
+  persist();
+  cerrarModal();
+  renderViajes();
+}
+function borrarViaje(id){
+  const n = gastosDeViaje(id).length;
+  if(!confirm('¿Eliminar este viaje' + (n ? ' y sus '+n+' gastos' : '') + '?')) return;
+  Object.keys(DB.gastosViaje||{}).forEach(k=>{ if(DB.gastosViaje[k].viajeId===id) delete DB.gastosViaje[k]; });
+  delete DB.viajes[id];
+  viajeAbierto = null;
+  persist();
+  cerrarModal();
+  renderViajes();
+}
+
+function modalGastoViaje(id){
+  const viaje = DB.viajes[viajeAbierto] || {};
+  const todos = gastosDeViaje(viajeAbierto).sort((a,b)=>(b.creado||0)-(a.creado||0));
+  const ultima = todos.length ? monedaDe(todos[0], viaje) : monedaDe(null, viaje);
+  const base = id ? DB.gastosViaje[id] : {fecha: hoyLocalV(), monto:'', desc:'', categoria:'Comida', pagador:(currentUser==='Vicky'?'Vicky':'Lucas'), moneda: ultima};
+  if(!base) return;
+  const monActual = monedaDe(base, viaje);
+  const opciones = [...new Set([...todos.map(g=>monedaDe(g, viaje)), monActual, '$', 'US$', '€'])];
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <h3>${id ? 'Editar gasto' : 'Nuevo gasto'}</h3>
+        <div class="split-row">
+          <div class="field"><label>Monto</label><input type="number" inputmode="decimal" step="0.01" id="gv-monto" value="${base.monto}"></div>
+          <div class="field"><label>Moneda</label><input type="text" id="gv-moneda" list="gv-monedas" value="${escH(monActual)}" maxlength="6" autocapitalize="characters"><datalist id="gv-monedas">${opciones.map(o=>`<option value="${escH(o)}">`).join('')}</datalist></div>
+        </div>
+        <div class="field"><label>Descripción</label><input type="text" id="gv-desc" value="${escH(base.desc)}" placeholder="Ej: Cena en Roma"></div>
+        <div class="field"><label>Quién pagó</label>
+          <select id="gv-pagador">
+            <option value="Lucas" ${base.pagador==='Lucas'?'selected':''}>Lucas</option>
+            <option value="Vicky" ${base.pagador==='Vicky'?'selected':''}>Vicky</option>
+          </select>
+        </div>
+        <div class="field"><label>Categoría</label>
+          <select id="gv-cat">${CATEGORIAS_VIAJE.map(c=>`<option ${base.categoria===c?'selected':''}>${c}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Fecha</label><input type="date" id="gv-fecha" value="${escH(base.fecha)}"></div>
+        <div class="modal-actions">
+          ${id ? `<button class="btn-danger" onclick="borrarGastoViaje('${id}')">Eliminar</button>` : '<button onclick="cerrarModal()">Cancelar</button>'}
+          <button class="btn-save" onclick="guardarGastoViaje(${id ? `'${id}'` : 'null'})">Guardar</button>
+        </div>
+      </div>
+    </div>`;
+}
+function guardarGastoViaje(id){
+  const monto = parseFloat(document.getElementById('gv-monto').value);
+  if(!(monto > 0)){ alert('Poné un monto válido.'); return; }
+  const categoria = document.getElementById('gv-cat').value;
+  const datos = {
+    viajeId: viajeAbierto,
+    monto,
+    moneda: document.getElementById('gv-moneda').value.trim() || '$',
+    desc: document.getElementById('gv-desc').value.trim() || categoria,
+    pagador: document.getElementById('gv-pagador').value,
+    categoria,
+    fecha: document.getElementById('gv-fecha').value || hoyLocalV()
+  };
+  if(!DB.gastosViaje) DB.gastosViaje = {};
+  if(id){ DB.gastosViaje[id] = {...DB.gastosViaje[id], ...datos}; }
+  else { DB.gastosViaje['gv' + Date.now()] = {...datos, creado: Date.now()}; }
+  persist();
+  cerrarModal();
+  renderViajes();
+}
+function borrarGastoViaje(id){
+  if(!confirm('¿Eliminar este gasto?')) return;
+  delete DB.gastosViaje[id];
+  persist();
+  cerrarModal();
+  renderViajes();
 }
 
 /* ---------- Inventario / Lista de súper ---------- */
@@ -882,6 +1106,7 @@ function showView(name){
   if(name==='cargar') prepCargarForm();
   if(name==='comparar') renderComparar();
   if(name==='inventario') renderInventario();
+  if(name==='viajes') renderViajes();
 }
 function configurarNavPorPerfil(){
   const esSuper = currentUser === 'Super';
